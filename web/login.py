@@ -1,12 +1,19 @@
 # -*- coding: utf-8 -*-
 r"""La puerta de entrada de RENTA IA.
 
-Es lo primero que ve alguien del sistema, así que se aparta de la paleta verde
-del libro y trabaja en blanco con acentos dorados: papel, tinta y filo de oro.
+Reproduce en HTML y CSS puros el diseño del componente React que pidió el
+usuario —cabecera con la marca, líneas de acento que se dibujan solas,
+partículas ascendentes en canvas, viñeta y tarjeta que sube al aparecer—,
+pasado de la escala oscura (zinc-950) a la clara (zinc-50):
 
-Todo el CSS va aquí dentro, sin tipografías ni archivos externos, porque la
-pantalla debe pintarse completa en la primera respuesta — cualquier descarga
-extra se nota justo en el momento en que el usuario está esperando.
+    fondo    #0A0A0B → #FAFAFA        texto     #FAFAFA → #18181B
+    líneas   #27272A → #E4E4E7        tarjeta   zinc-900/70 → blanco/70
+    botón    claro sobre oscuro → oscuro sobre claro
+
+No se usa React ni Tailwind: el resto del sistema es Python que devuelve HTML,
+y montar un front aparte solo para esta pantalla obligaría a mantener dos
+aplicaciones. Todo va embebido, sin tipografías ni scripts externos, para que
+la pantalla se pinte completa en la primera respuesta.
 """
 import html
 
@@ -17,154 +24,237 @@ def e(t):
 
 ESTILO = """
 :root{
-  --tinta:#1C1B18; --tinta-2:#3A3833; --gris:#6E6A61; --gris-2:#96918A;
-  --oro:#B08D3F; --oro-claro:#D9BE86; --oro-palido:#F3E9D2; --oro-brillo:#E7D3A1;
-  --papel:#FFFFFF; --fondo:#FBF9F5; --linea:#EBE5D9;
-  --error:#9B2C2C; --error-fondo:#FDF3F3; --error-borde:#F0D5D5;
+  --z50:#FAFAFA; --z100:#F4F4F5; --z200:#E4E4E7; --z300:#D4D4D8;
+  --z400:#A1A1AA; --z500:#71717A; --z600:#52525B; --z900:#18181B; --z950:#09090B;
+  --rojo:#B42318; --rojo-fondo:#FEF3F2; --rojo-borde:#FECDCA;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{
-  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
-  background:var(--fondo); color:var(--tinta);
-  font-size:15px; line-height:1.5;
-  display:grid; place-items:center; padding:24px;
+  font-family:ui-sans-serif,system-ui,'Segoe UI',-apple-system,sans-serif;
+  background:var(--z50); color:var(--z900); font-size:14px; line-height:1.5;
   -webkit-font-smoothing:antialiased;
-  position:relative; overflow-x:hidden;
 }
-/* halo dorado tenue: da profundidad sin ensuciar el blanco */
-body::before{
-  content:''; position:fixed; inset:0; pointer-events:none; z-index:0;
-  background:
-    radial-gradient(720px 420px at 50% -10%, rgba(217,190,134,.28), transparent 62%),
-    radial-gradient(540px 340px at 92% 104%, rgba(176,141,63,.12), transparent 64%);
-}
-.marco{position:relative; z-index:1; width:100%; max-width:412px}
+.pantalla{position:fixed; inset:0; background:var(--z50); color:var(--z900); overflow:hidden}
 
-/* ── membrete ── */
-.membrete{text-align:center; margin-bottom:26px; animation:surgir .55s cubic-bezier(.2,.7,.3,1) both}
-.sello{
-  width:60px; height:60px; margin:0 auto 16px; border-radius:16px;
-  background:linear-gradient(145deg,#F7EEDA,#E3CB96 46%,#B08D3F);
-  display:grid; place-items:center;
-  font-family:Georgia,'Times New Roman',serif; font-weight:700; font-size:27px;
-  color:#4A3714;
-  box-shadow:0 10px 26px rgba(176,141,63,.28), inset 0 1px 0 rgba(255,255,255,.75);
-}
-.wordmark{font-family:Georgia,'Times New Roman',serif; font-size:31px; font-weight:700;
-  letter-spacing:-.4px; line-height:1.1}
-.wordmark span{
-  background:linear-gradient(96deg,#C9A227,#A87F27 52%,#D9BE86);
-  -webkit-background-clip:text; background-clip:text; color:transparent;
-}
-.lema{color:var(--gris); font-size:12.6px; margin-top:8px; letter-spacing:.01em}
+/* viñeta */
+.vineta{position:absolute; inset:0; pointer-events:none;
+  background:radial-gradient(80% 60% at 50% 30%, rgba(9,9,11,.045), transparent 60%)}
 
-/* ── tarjeta ── */
-.tarjeta{
-  background:var(--papel); border:1px solid var(--linea); border-radius:18px;
-  padding:34px 32px 28px; position:relative; overflow:hidden;
-  box-shadow:0 1px 2px rgba(28,27,24,.04), 0 18px 44px -22px rgba(28,27,24,.22);
-  animation:surgir .6s .08s cubic-bezier(.2,.7,.3,1) both;
-}
-/* filo de oro superior */
-.tarjeta::before{
-  content:''; position:absolute; top:0; left:0; right:0; height:2px;
-  background:linear-gradient(90deg,transparent,var(--oro-claro) 18%,var(--oro) 50%,var(--oro-claro) 82%,transparent);
-}
-h1{font-family:Georgia,serif; font-size:20.5px; font-weight:700; letter-spacing:-.2px}
-.intro{color:var(--gris); font-size:13.2px; margin:7px 0 24px}
+/* líneas de acento que se dibujan */
+.accent-lines{position:absolute; inset:0; pointer-events:none; opacity:.7}
+.hline,.vline{position:absolute; background:var(--z200); will-change:transform,opacity}
+.hline{left:0; right:0; height:1px; transform:scaleX(0); transform-origin:50% 50%;
+  animation:drawX .8s cubic-bezier(.22,.61,.36,1) forwards}
+.vline{top:0; bottom:0; width:1px; transform:scaleY(0); transform-origin:50% 0%;
+  animation:drawY .9s cubic-bezier(.22,.61,.36,1) forwards}
+.hline:nth-child(1){top:18%; animation-delay:.12s}
+.hline:nth-child(2){top:50%; animation-delay:.22s}
+.hline:nth-child(3){top:82%; animation-delay:.32s}
+.vline:nth-child(4){left:22%; animation-delay:.42s}
+.vline:nth-child(5){left:50%; animation-delay:.54s}
+.vline:nth-child(6){left:78%; animation-delay:.66s}
+.hline::after,.vline::after{content:""; position:absolute; inset:0; opacity:0;
+  background:linear-gradient(90deg,transparent,rgba(9,9,11,.20),transparent);
+  animation:shimmer .9s ease-out forwards}
+.hline:nth-child(1)::after{animation-delay:.12s}
+.hline:nth-child(2)::after{animation-delay:.22s}
+.hline:nth-child(3)::after{animation-delay:.32s}
+.vline:nth-child(4)::after{animation-delay:.42s}
+.vline:nth-child(5)::after{animation-delay:.54s}
+.vline:nth-child(6)::after{animation-delay:.66s}
+@keyframes drawX{0%{transform:scaleX(0);opacity:0}60%{opacity:.95}100%{transform:scaleX(1);opacity:.7}}
+@keyframes drawY{0%{transform:scaleY(0);opacity:0}60%{opacity:.95}100%{transform:scaleY(1);opacity:.7}}
+@keyframes shimmer{0%{opacity:0}35%{opacity:.25}100%{opacity:0}}
 
-/* ── campos con etiqueta flotante ── */
-.campo{position:relative; margin-bottom:15px}
-.campo input{
-  width:100%; font-family:inherit; font-size:15px; color:var(--tinta);
-  background:#fff; border:1px solid var(--linea); border-radius:11px;
-  padding:23px 15px 9px; transition:border-color .18s, box-shadow .18s, background .18s;
-}
-.campo input::placeholder{color:transparent}
-.campo label{
-  position:absolute; left:16px; top:16px; color:var(--gris-2); font-size:14.5px;
-  pointer-events:none; transition:all .16s cubic-bezier(.2,.7,.3,1);
-}
-.campo input:focus{
-  outline:none; border-color:var(--oro-claro); background:#FFFDF8;
-  box-shadow:0 0 0 3.5px rgba(217,190,134,.26);
-}
-.campo input:focus + label,
-.campo input:not(:placeholder-shown) + label{
-  top:8px; font-size:10.5px; letter-spacing:.09em; text-transform:uppercase;
-  font-weight:700; color:var(--oro);
-}
-.campo.clave input{padding-right:50px; letter-spacing:.02em}
-.ojo{
-  position:absolute; right:7px; top:50%; transform:translateY(-50%);
-  width:38px; height:38px; border:none; background:none; cursor:pointer;
-  border-radius:9px; color:var(--gris-2); display:grid; place-items:center;
-  transition:color .15s, background .15s;
-}
-.ojo:hover{color:var(--oro); background:var(--oro-palido)}
-.ojo:focus-visible{outline:2px solid var(--oro-claro); outline-offset:-2px}
-.ojo svg{width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.7;
-  stroke-linecap:round; stroke-linejoin:round}
+canvas#particulas{position:absolute; inset:0; width:100%; height:100%;
+  opacity:.55; mix-blend-mode:multiply; pointer-events:none}
 
-/* ── botón ── */
-button.entrar{
-  width:100%; margin-top:9px; padding:13px 20px; border:none; border-radius:11px;
-  font-family:inherit; font-size:14.6px; font-weight:600; letter-spacing:.015em;
-  color:#FDFBF6; cursor:pointer; position:relative; overflow:hidden;
-  background:linear-gradient(180deg,#2B2926,#1C1B18);
-  box-shadow:0 1px 0 rgba(255,255,255,.06) inset, 0 8px 20px -10px rgba(28,27,24,.6);
-  transition:transform .14s, box-shadow .2s, filter .2s;
-}
-button.entrar::after{  /* barrido dorado al pasar el cursor */
-  content:''; position:absolute; inset:0; opacity:0; transition:opacity .25s;
-  background:linear-gradient(100deg,transparent 18%,rgba(217,190,134,.24) 50%,transparent 82%);
-}
-button.entrar:hover{transform:translateY(-1px);
-  box-shadow:0 10px 24px -10px rgba(176,141,63,.65), 0 0 0 1px rgba(176,141,63,.5)}
-button.entrar:hover::after{opacity:1}
-button.entrar:active{transform:translateY(0)}
-button.entrar:focus-visible{outline:2px solid var(--oro); outline-offset:2px}
-button.entrar[disabled]{filter:saturate(.4) opacity(.7); cursor:progress; transform:none}
+/* cabecera */
+header{position:absolute; left:0; right:0; top:0; display:flex; align-items:center;
+  justify-content:space-between; padding:16px 24px;
+  border-bottom:1px solid rgba(228,228,231,.8); z-index:2;
+  background:rgba(250,250,250,.55); backdrop-filter:blur(6px)}
+.marca-min{font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--z500)}
+.marca-min b{color:var(--z900); font-weight:600}
+.btn-contacto{display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 14px;
+  border-radius:8px; border:1px solid var(--z200); background:#fff; color:var(--z900);
+  font-size:14px; font-weight:500; text-decoration:none; transition:background .15s,border-color .15s}
+.btn-contacto:hover{background:var(--z100); border-color:var(--z300)}
+.btn-contacto svg{width:16px; height:16px}
 
-/* ── avisos ── */
-.error{
-  background:var(--error-fondo); border:1px solid var(--error-borde); color:var(--error);
-  border-radius:11px; padding:11px 14px; font-size:13px; margin-bottom:18px;
-  display:flex; gap:9px; align-items:flex-start;
-  animation:temblar .4s cubic-bezier(.36,.07,.19,.97) both;
-}
-.error b{font-weight:700}
-.mayus{
-  margin-top:9px; font-size:12.2px; color:#8A6D1F; background:var(--oro-palido);
-  border:1px solid var(--oro-brillo); border-radius:9px; padding:8px 12px; display:none;
-}
-.mayus.ver{display:block; animation:surgir .2s both}
-.reserva{
-  margin-top:22px; padding-top:17px; border-top:1px solid var(--linea);
-  font-size:11.6px; color:var(--gris-2); line-height:1.65; text-align:center;
-}
-.pie{text-align:center; margin-top:20px; font-size:11.4px; color:var(--gris-2);
-  animation:surgir .6s .16s both}
+/* centro */
+.centro{height:100%; width:100%; display:grid; place-items:center; padding:16px; position:relative; z-index:1}
 
-@keyframes surgir{from{opacity:0; transform:translateY(11px)} to{opacity:1; transform:none}}
-@keyframes temblar{
-  10%,90%{transform:translateX(-1px)} 20%,80%{transform:translateX(2px)}
-  30%,50%,70%{transform:translateX(-4px)} 40%,60%{transform:translateX(4px)}
+/* tarjeta */
+.card{
+  width:100%; max-width:384px; border:1px solid var(--z200); border-radius:12px;
+  background:rgba(255,255,255,.72); backdrop-filter:blur(10px);
+  box-shadow:0 1px 2px rgba(9,9,11,.05), 0 24px 48px -28px rgba(9,9,11,.25);
+  opacity:0; transform:translateY(20px);
+  animation:fadeUp .8s cubic-bezier(.22,.61,.36,1) .4s forwards;
 }
+@keyframes fadeUp{to{opacity:1; transform:translateY(0)}}
+.card-header{padding:24px 24px 0; display:flex; flex-direction:column; gap:6px}
+.card-header h1{font-size:24px; font-weight:600; letter-spacing:-.02em; line-height:1.15}
+.card-header p{font-size:14px; color:var(--z500)}
+.card-content{padding:24px; display:grid; gap:20px}
+.card-footer{padding:0 24px 24px; display:flex; align-items:center; justify-content:center;
+  font-size:14px; color:var(--z500)}
+.card-footer b{color:var(--z900); font-weight:500; margin-left:4px}
+
+/* campos */
+.grupo{display:grid; gap:8px}
+.grupo > label{font-size:14px; font-weight:500; color:var(--z600); line-height:1}
+.rel{position:relative; display:flex; align-items:center}
+.rel > .ic{position:absolute; left:12px; width:16px; height:16px; color:var(--z400); pointer-events:none}
+.rel input{
+  width:100%; height:40px; border-radius:8px; border:1px solid var(--z200); background:#fff;
+  padding:8px 12px 8px 38px; font-family:inherit; font-size:14px; color:var(--z900);
+  box-shadow:0 1px 2px rgba(9,9,11,.04); transition:border-color .15s, box-shadow .15s;
+}
+.rel input::placeholder{color:var(--z400)}
+.rel input:focus{outline:none; border-color:var(--z400); box-shadow:0 0 0 3px rgba(161,161,170,.20)}
+.rel.clave input{padding-right:40px}
+.ojo{position:absolute; right:6px; display:grid; place-items:center; width:30px; height:30px;
+  border:none; background:none; border-radius:6px; color:var(--z400); cursor:pointer;
+  transition:color .15s, background .15s}
+.ojo:hover{color:var(--z600); background:var(--z100)}
+.ojo:focus-visible{outline:2px solid var(--z400); outline-offset:-2px}
+.ojo svg{width:16px; height:16px}
+svg{fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round}
+
+/* recordarme + ayuda */
+.fila{display:flex; align-items:center; justify-content:space-between; gap:12px}
+.recordar{display:flex; align-items:center; gap:8px}
+.recordar input{appearance:none; -webkit-appearance:none; width:16px; height:16px; flex:none;
+  border:1px solid var(--z300); border-radius:4px; background:#fff; cursor:pointer;
+  display:grid; place-items:center; transition:background .15s, border-color .15s}
+.recordar input:checked{background:var(--z900); border-color:var(--z900)}
+.recordar input:checked::after{content:""; width:9px; height:5px; border:2px solid #fff;
+  border-top:0; border-right:0; transform:rotate(-45deg) translate(1px,-1px)}
+.recordar input:focus-visible{outline:2px solid var(--z400); outline-offset:2px}
+.recordar label{font-size:14px; color:var(--z500); cursor:pointer}
+.fila .ayuda{font-size:14px; color:var(--z600); text-decoration:none}
+.fila .ayuda:hover{color:var(--z900); text-decoration:underline}
+
+/* botón principal */
+button.continuar{
+  width:100%; height:40px; border:none; border-radius:8px; cursor:pointer;
+  background:var(--z900); color:var(--z50); font-family:inherit; font-size:14px; font-weight:500;
+  transition:background .15s, transform .12s;
+}
+button.continuar:hover{background:#27272A}
+button.continuar:active{transform:translateY(1px)}
+button.continuar:focus-visible{outline:2px solid var(--z900); outline-offset:2px}
+button.continuar[disabled]{opacity:.6; cursor:progress}
+
+/* avisos */
+.error{display:flex; gap:8px; align-items:flex-start; background:var(--rojo-fondo);
+  border:1px solid var(--rojo-borde); color:var(--rojo); border-radius:8px;
+  padding:10px 12px; font-size:13px; animation:temblar .4s cubic-bezier(.36,.07,.19,.97) both}
+@keyframes temblar{10%,90%{transform:translateX(-1px)}20%,80%{transform:translateX(2px)}
+  30%,50%,70%{transform:translateX(-4px)}40%,60%{transform:translateX(4px)}}
+.mayus{font-size:12.5px; color:var(--z600); background:var(--z100); border:1px solid var(--z200);
+  border-radius:8px; padding:8px 11px; display:none}
+.mayus.ver{display:block}
+.reserva{font-size:11.5px; color:var(--z400); text-align:center; line-height:1.6}
+
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none !important; transition:none !important}
+  .card{opacity:1; transform:none}
+  .hline{transform:scaleX(1)} .vline{transform:scaleY(1)}
+  canvas#particulas{display:none}
 }
 @media(max-width:420px){
-  .tarjeta{padding:28px 22px 24px; border-radius:15px}
-  .wordmark{font-size:27px}
+  .card-header{padding:20px 18px 0} .card-content{padding:18px} .card-footer{padding:0 18px 18px}
+  header{padding:12px 16px}
 }
 """
 
-OJO = """<svg viewBox="0 0 24 24" aria-hidden="true"><path class="o1"
-d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/>
-<circle class="o1" cx="12" cy="12" r="2.7"/>
-<path class="o2" style="display:none" d="M3 3l18 18"/></svg>"""
+IC_USUARIO = ('<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">'
+              '<circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>')
+IC_CANDADO = ('<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">'
+              '<rect width="18" height="11" x="3" y="11" rx="2"/>'
+              '<path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>')
+IC_FLECHA = ('<svg viewBox="0 0 24 24" aria-hidden="true">'
+             '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>')
+IC_OJO = ('<svg id="ojo-abierto" viewBox="0 0 24 24" aria-hidden="true">'
+          '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/>'
+          '<circle cx="12" cy="12" r="3"/></svg>'
+          '<svg id="ojo-cerrado" viewBox="0 0 24 24" aria-hidden="true" style="display:none">'
+          '<path d="M10.7 5.1A10.9 10.9 0 0 1 12 5c6.5 0 10 7 10 7a18 18 0 0 1-2.4 3.4"/>'
+          '<path d="M6.6 6.6A18 18 0 0 0 2 12s3.5 7 10 7a10.8 10.8 0 0 0 5.4-1.4"/>'
+          '<path d="M2 2l20 20"/></svg>')
+
+GUION = """
+(function(){
+  // ── partículas ascendentes ────────────────────────────────────
+  var lienzo = document.getElementById('particulas');
+  var ctx = lienzo && lienzo.getContext('2d');
+  var quieto = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (ctx && !quieto) {
+    var ps = [], raf = 0;
+    function medir(){ lienzo.width = window.innerWidth; lienzo.height = window.innerHeight; }
+    function nueva(){
+      return { x: Math.random() * lienzo.width, y: Math.random() * lienzo.height,
+               v: Math.random() * 0.25 + 0.05, o: Math.random() * 0.22 + 0.08 };
+    }
+    function iniciar(){
+      ps = [];
+      var n = Math.floor((lienzo.width * lienzo.height) / 9000);
+      for (var i = 0; i < n; i++) ps.push(nueva());
+    }
+    function pintar(){
+      ctx.clearRect(0, 0, lienzo.width, lienzo.height);
+      for (var i = 0; i < ps.length; i++) {
+        var p = ps[i];
+        p.y -= p.v;
+        if (p.y < 0) {
+          p.x = Math.random() * lienzo.width;
+          p.y = lienzo.height + Math.random() * 40;
+          p.v = Math.random() * 0.25 + 0.05;
+          p.o = Math.random() * 0.22 + 0.08;
+        }
+        // en claro las partículas son tinta, no luz
+        ctx.fillStyle = 'rgba(24,24,27,' + p.o + ')';
+        ctx.fillRect(p.x, p.y, 0.7, 2.2);
+      }
+      raf = requestAnimationFrame(pintar);
+    }
+    medir(); iniciar(); raf = requestAnimationFrame(pintar);
+    window.addEventListener('resize', function(){ medir(); iniciar(); });
+  }
+
+  // ── mostrar u ocultar la contraseña ───────────────────────────
+  var f = document.getElementById('f'), b = document.getElementById('b'),
+      c = document.getElementById('clave'), ojo = document.getElementById('ojo'),
+      mayus = document.getElementById('mayus');
+  ojo.addEventListener('click', function(){
+    var oculta = c.type === 'password';
+    c.type = oculta ? 'text' : 'password';
+    ojo.setAttribute('aria-pressed', oculta);
+    ojo.setAttribute('aria-label', oculta ? 'Ocultar la contraseña' : 'Mostrar la contraseña');
+    document.getElementById('ojo-abierto').style.display = oculta ? 'none' : '';
+    document.getElementById('ojo-cerrado').style.display = oculta ? '' : 'none';
+    c.focus();
+  });
+
+  // El bloqueo de mayúsculas es la causa más común de un acceso que "no sirve".
+  function revisar(ev){
+    var activo = ev.getModifierState && ev.getModifierState('CapsLock');
+    mayus.classList.toggle('ver', !!activo);
+  }
+  c.addEventListener('keydown', revisar);
+  c.addEventListener('keyup', revisar);
+  c.addEventListener('blur', function(){ mayus.classList.remove('ver'); });
+
+  f.addEventListener('submit', function(ev){
+    if (!f.usuario.value.trim() || !f.clave.value) { ev.preventDefault(); return; }
+    b.disabled = true; b.textContent = 'Verificando…';
+  });
+})();
+"""
 
 
 def pagina(mensaje='', usuario=''):
@@ -174,70 +264,69 @@ def pagina(mensaje='', usuario=''):
     return f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<meta name="theme-color" content="#FBF9F5">
+<meta name="theme-color" content="#FAFAFA">
 <title>Acceso · RENTA IA</title><style>{ESTILO}</style></head><body>
-<main class="marco">
-  <div class="membrete">
-    <div class="sello" aria-hidden="true">R</div>
-    <div class="wordmark">RENTA<span> IA</span></div>
-    <p class="lema">Declaraciones de renta de personas naturales,<br>
-      desde la exógena de la DIAN</p>
+<section class="pantalla">
+  <div class="vineta"></div>
+  <div class="accent-lines">
+    <div class="hline"></div><div class="hline"></div><div class="hline"></div>
+    <div class="vline"></div><div class="vline"></div><div class="vline"></div>
   </div>
+  <canvas id="particulas"></canvas>
 
-  <div class="tarjeta">
-    <h1>Acceso al sistema</h1>
-    <p class="intro">Ingrese con las credenciales que le entregó el contador.</p>
-    {error}
-    <form method="post" action="/entrar" id="f" novalidate>
-      <div class="campo">
-        <input type="text" id="u" name="usuario" placeholder=" " required
-               autocomplete="username" autocapitalize="none" autocorrect="off"
-               spellcheck="false" value="{e(usuario)}" {'' if usuario else 'autofocus'}>
-        <label for="u">Usuario</label>
+  <header>
+    <span class="marca-min"><b>RENTA IA</b></span>
+    <a class="btn-contacto" href="mailto:santiagotrek2@gmail.com?subject=Acceso%20a%20RENTA%20IA">
+      <span>Contacto</span>{IC_FLECHA}</a>
+  </header>
+
+  <div class="centro">
+    <form class="card" method="post" action="/entrar" id="f" novalidate>
+      <div class="card-header">
+        <h1>Bienvenido de nuevo</h1>
+        <p>Ingrese a su cuenta</p>
       </div>
-      <div class="campo clave">
-        <input type="password" id="c" name="clave" placeholder=" " required
-               autocomplete="current-password" {'autofocus' if usuario else ''}>
-        <label for="c">Contraseña</label>
-        <button type="button" class="ojo" id="ojo" aria-label="Mostrar la contraseña"
-                aria-pressed="false" tabindex="0">{OJO}</button>
+
+      <div class="card-content">
+        {error}
+        <div class="grupo">
+          <label for="usuario">Usuario</label>
+          <div class="rel">{IC_USUARIO}
+            <input id="usuario" name="usuario" type="text" placeholder="admin" required
+                   autocomplete="username" autocapitalize="none" autocorrect="off"
+                   spellcheck="false" value="{e(usuario)}" {'' if usuario else 'autofocus'}>
+          </div>
+        </div>
+
+        <div class="grupo">
+          <label for="clave">Contraseña</label>
+          <div class="rel clave">{IC_CANDADO}
+            <input id="clave" name="clave" type="password" placeholder="••••••••" required
+                   autocomplete="current-password" {'autofocus' if usuario else ''}>
+            <button type="button" class="ojo" id="ojo" aria-pressed="false"
+                    aria-label="Mostrar la contraseña">{IC_OJO}</button>
+          </div>
+          <div class="mayus" id="mayus">Bloqueo de mayúsculas activado.</div>
+        </div>
+
+        <div class="fila">
+          <span class="recordar">
+            <input type="checkbox" id="recordar" name="recordar" value="1">
+            <label for="recordar">Recordarme</label>
+          </span>
+          <a class="ayuda" href="mailto:santiagotrek2@gmail.com?subject=Clave%20de%20RENTA%20IA">
+            ¿Olvidó su contraseña?</a>
+        </div>
+
+        <button type="submit" class="continuar" id="b">Continuar</button>
+
+        <p class="reserva">Información tributaria sujeta a reserva.<br>
+          El acceso queda registrado.</p>
       </div>
-      <div class="mayus" id="mayus">Bloqueo de mayúsculas activado.</div>
-      <button type="submit" class="entrar" id="b">Entrar</button>
+
+      <div class="card-footer">¿No tiene acceso?<b>Solicítelo al contador</b></div>
     </form>
-    <p class="reserva">Información tributaria sujeta a reserva.<br>
-      El acceso queda registrado.</p>
   </div>
-  <p class="pie">RENTA IA · el contador revisa y libera antes de presentar</p>
-</main>
-<script>
-(function(){{
-  var f=document.getElementById('f'), b=document.getElementById('b'),
-      c=document.getElementById('c'), ojo=document.getElementById('ojo'),
-      mayus=document.getElementById('mayus');
-
-  ojo.addEventListener('click', function(){{
-    var oculta = c.type === 'password';
-    c.type = oculta ? 'text' : 'password';
-    ojo.setAttribute('aria-pressed', oculta);
-    ojo.setAttribute('aria-label', oculta ? 'Ocultar la contraseña' : 'Mostrar la contraseña');
-    ojo.querySelector('.o2').style.display = oculta ? '' : 'none';
-    c.focus();
-  }});
-
-  // El bloqueo de mayúsculas es la causa más común de un login que "no sirve".
-  function revisarMayus(ev){{
-    var activo = ev.getModifierState && ev.getModifierState('CapsLock');
-    mayus.classList.toggle('ver', !!activo);
-  }}
-  c.addEventListener('keydown', revisarMayus);
-  c.addEventListener('keyup', revisarMayus);
-  c.addEventListener('blur', function(){{ mayus.classList.remove('ver'); }});
-
-  f.addEventListener('submit', function(ev){{
-    if(!f.usuario.value.trim() || !f.clave.value){{ ev.preventDefault(); return; }}
-    b.disabled = true; b.textContent = 'Verificando…';
-  }});
-}})();
-</script>
+</section>
+<script>{GUION}</script>
 </body></html>"""

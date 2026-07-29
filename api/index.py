@@ -111,7 +111,8 @@ def autenticar(cabecera):
 
 # ── sesión en cookie firmada ────────────────────────────────────────
 COOKIE = 'rentaia_sesion'
-DURACION = 12 * 3600          # una jornada de trabajo
+DURACION = 12 * 3600            # una jornada de trabajo
+DURACION_LARGA = 30 * 24 * 3600  # con «Recordarme» marcado
 
 
 def _secreto():
@@ -158,6 +159,21 @@ def leer_sesion(cabecera_cookie):
 class handler(BaseHTTPRequestHandler):
     server_version = 'RentaIA/1.0'
 
+    def _ruta(self):
+        """La ruta que pidió el navegador.
+
+        Vercel reescribe todo a /api/index, así que `self.path` no siempre trae
+        la original: el rewrite la reenvía en el parámetro `__ruta` y esa es la
+        que manda. Sin esto, un POST a /entrar llegaba como /api/index y el
+        formulario de acceso no respondía.
+        """
+        partes = urllib.parse.urlparse(self.path)
+        pedida = urllib.parse.parse_qs(partes.query).get('__ruta', [None])[0]
+        ruta = '/' + pedida.lstrip('/') if pedida is not None else partes.path
+        if ruta in ('/api/index', '/api/index.py'):
+            ruta = '/'
+        return ruta.rstrip('/') or '/'
+
     # ── salida ──────────────────────────────────────────────────────
     def _html(self, contenido, code=200, cabeceras=None):
         datos = contenido.encode('utf-8')
@@ -175,13 +191,14 @@ class handler(BaseHTTPRequestHandler):
     def _pedir_clave(self, mensaje='', usuario='', code=401):
         self._html(login.pagina(mensaje, usuario), code)
 
-    def _abrir_sesion(self, usuario):
-        vence = int(time.time()) + DURACION
+    def _abrir_sesion(self, usuario, recordar=False):
+        dura = DURACION_LARGA if recordar else DURACION
+        vence = int(time.time()) + dura
         # HttpOnly: el JavaScript de la página no puede leerla.
         # Secure + SameSite=Lax: no viaja fuera de HTTPS ni en peticiones de
         # otros sitios, que es la defensa contra CSRF en las acciones de subida.
         galleta = (f'{COOKIE}={firmar(usuario, vence)}; Path=/; HttpOnly; '
-                   f'Secure; SameSite=Lax; Max-Age={DURACION}')
+                   f'Secure; SameSite=Lax; Max-Age={dura}')
         self.send_response(303)
         self.send_header('Location', '/')
         self.send_header('Set-Cookie', galleta)
@@ -234,7 +251,7 @@ class handler(BaseHTTPRequestHandler):
 
     # ── GET ─────────────────────────────────────────────────────────
     def do_GET(self):
-        ruta = urllib.parse.urlparse(self.path).path.rstrip('/') or '/'
+        ruta = self._ruta()
         if ruta == '/salir':
             return self._cerrar_sesion()
         if ruta == '/entrar':
@@ -291,7 +308,7 @@ class handler(BaseHTTPRequestHandler):
 
     # ── POST ────────────────────────────────────────────────────────
     def do_POST(self):
-        ruta = urllib.parse.urlparse(self.path).path.rstrip('/') or '/'
+        ruta = self._ruta()
         if ruta == '/entrar':
             return self._entrar()
         ses = self._sesion()
@@ -363,6 +380,7 @@ class handler(BaseHTTPRequestHandler):
                 self.rfile.read(min(largo, 8192)).decode('utf-8', 'replace'))
             usuario = (campos.get('usuario') or [''])[0].strip()
             clave = (campos.get('clave') or [''])[0]
+            recordar = bool(campos.get('recordar'))
         except Exception:
             return self._pedir_clave('No se pudo leer el formulario. Intente de nuevo.')
         if not usuario or not clave:
@@ -372,7 +390,7 @@ class handler(BaseHTTPRequestHandler):
             # equivoca una vez, y no dice cuál de los dos datos falló.
             time.sleep(1.2)
             return self._pedir_clave('Usuario o contraseña incorrectos.', usuario)
-        self._abrir_sesion(usuario)
+        self._abrir_sesion(usuario, recordar)
 
     def log_message(self, fmt, *args):
         pass
