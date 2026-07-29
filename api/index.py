@@ -21,11 +21,14 @@ Sin las contraseñas configuradas el sitio no sirve nada: preferible fuera de
 servicio que abierto.
 """
 import base64
+import hashlib
 import hmac
 import os
 import sys
 import tempfile
+import time
 import urllib.parse
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -38,6 +41,7 @@ import autogen
 import calculos
 import clasificador
 import db
+import login
 import multipart
 import nube
 import render
@@ -82,8 +86,19 @@ def hay_configuracion():
     return faltan
 
 
+def verificar(usuario, clave):
+    """¿Coinciden usuario y contraseña? compare_digest evita filtrar la clave
+    por el tiempo que tarda la comparación."""
+    esperada = credencial((usuario or '').strip())
+    return bool(esperada and hmac.compare_digest(clave or '', esperada))
+
+
 def autenticar(cabecera):
-    """Devuelve el usuario de un encabezado Basic válido, o None."""
+    """Usuario de un encabezado Basic válido, o None.
+
+    La entrada normal es el formulario; esto queda para revisar el sitio desde
+    la consola sin pasar por el navegador.
+    """
     if not cabecera or not cabecera.lower().startswith('basic '):
         return None
     try:
@@ -91,11 +106,53 @@ def autenticar(cabecera):
     except Exception:
         return None
     usuario, _, clave = crudo.partition(':')
-    esperada = credencial(usuario)
-    # compare_digest evita filtrar la contraseña por el tiempo de respuesta.
-    if esperada and hmac.compare_digest(clave, esperada):
-        return usuario
-    return None
+    return usuario if verificar(usuario, clave) else None
+
+
+# ── sesión en cookie firmada ────────────────────────────────────────
+COOKIE = 'rentaia_sesion'
+DURACION = 12 * 3600          # una jornada de trabajo
+
+
+def _secreto():
+    """Clave para firmar las sesiones.
+
+    Si no se configura una, se deriva de las contraseñas: así cambiar una
+    contraseña invalida las sesiones abiertas, que es justo lo que se espera.
+    """
+    base = env('RENTA_IA_SECRETO') or '|'.join(
+        credencial(u) for u in sorted(PERFILES))
+    return hashlib.sha256(('renta-ia:' + base).encode('utf-8')).digest()
+
+
+def firmar(usuario, vence):
+    mensaje = f'{usuario}|{vence}'.encode('utf-8')
+    firma = hmac.new(_secreto(), mensaje, hashlib.sha256).hexdigest()[:32]
+    crudo = f'{usuario}|{vence}|{firma}'.encode('utf-8')
+    return base64.urlsafe_b64encode(crudo).decode('ascii').rstrip('=')
+
+
+def leer_sesion(cabecera_cookie):
+    """Usuario de una cookie de sesión vigente y bien firmada, o None."""
+    if not cabecera_cookie:
+        return None
+    try:
+        galletas = SimpleCookie()
+        galletas.load(cabecera_cookie)
+        if COOKIE not in galletas:
+            return None
+        valor = galletas[COOKIE].value
+        crudo = base64.urlsafe_b64decode(valor + '=' * (-len(valor) % 4)).decode('utf-8')
+        usuario, vence, firma = crudo.split('|')
+    except Exception:
+        return None
+    if usuario not in PERFILES:
+        return None
+    esperada = hmac.new(_secreto(), f'{usuario}|{vence}'.encode('utf-8'),
+                        hashlib.sha256).hexdigest()[:32]
+    if not hmac.compare_digest(firma, esperada):
+        return None
+    return usuario if int(vence) > time.time() else None
 
 
 class handler(BaseHTTPRequestHandler):
@@ -115,13 +172,29 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(datos)
 
-    def _pedir_clave(self, mensaje=''):
-        cuerpo = ('<div class="vacio">Esta bandeja contiene declaraciones de '
-                  'personas reales. Ingrese con el usuario y la contraseña que le '
-                  'entregó el contador.' + (f'<p>{e(mensaje)}</p>' if mensaje else '')
-                  + '</div>')
-        self._html(render.pagina('Acceso restringido', cuerpo, pie=render.PIE_NUBE),
-                   401, {'WWW-Authenticate': 'Basic realm="RENTA IA", charset="UTF-8"'})
+    def _pedir_clave(self, mensaje='', usuario='', code=401):
+        self._html(login.pagina(mensaje, usuario), code)
+
+    def _abrir_sesion(self, usuario):
+        vence = int(time.time()) + DURACION
+        # HttpOnly: el JavaScript de la página no puede leerla.
+        # Secure + SameSite=Lax: no viaja fuera de HTTPS ni en peticiones de
+        # otros sitios, que es la defensa contra CSRF en las acciones de subida.
+        galleta = (f'{COOKIE}={firmar(usuario, vence)}; Path=/; HttpOnly; '
+                   f'Secure; SameSite=Lax; Max-Age={DURACION}')
+        self.send_response(303)
+        self.send_header('Location', '/')
+        self.send_header('Set-Cookie', galleta)
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+
+    def _cerrar_sesion(self):
+        self.send_response(303)
+        self.send_header('Location', '/entrar')
+        self.send_header('Set-Cookie',
+                         f'{COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0')
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
 
     def _error(self, mensaje, code=500):
         self._html(render.pagina('Error', f'<div class="err">{e(mensaje)}</div>'
@@ -135,7 +208,8 @@ class handler(BaseHTTPRequestHandler):
             self._error('El sitio no está configurado todavía. Faltan estas '
                         'variables de entorno en Vercel: ' + ', '.join(faltan), 503)
             return None
-        usuario = autenticar(self.headers.get('Authorization'))
+        usuario = (leer_sesion(self.headers.get('Cookie'))
+                   or autenticar(self.headers.get('Authorization')))
         if not usuario:
             self._pedir_clave()
             return None
@@ -162,7 +236,19 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         ruta = urllib.parse.urlparse(self.path).path.rstrip('/') or '/'
         if ruta == '/salir':
-            return self._pedir_clave('Sesión cerrada.')
+            return self._cerrar_sesion()
+        if ruta == '/entrar':
+            faltan = hay_configuracion()
+            if faltan:
+                return self._error('El sitio no está configurado todavía. Faltan '
+                                   'estas variables de entorno en Vercel: '
+                                   + ', '.join(faltan), 503)
+            if leer_sesion(self.headers.get('Cookie')):
+                self.send_response(303)
+                self.send_header('Location', '/')
+                self.end_headers()
+                return
+            return self._pedir_clave(code=200)
         ses = self._sesion()
         if not ses:
             return
@@ -206,6 +292,8 @@ class handler(BaseHTTPRequestHandler):
     # ── POST ────────────────────────────────────────────────────────
     def do_POST(self):
         ruta = urllib.parse.urlparse(self.path).path.rstrip('/') or '/'
+        if ruta == '/entrar':
+            return self._entrar()
         ses = self._sesion()
         if not ses:
             return
@@ -264,6 +352,27 @@ class handler(BaseHTTPRequestHandler):
                 self._html(self._bandeja(ses, f'No se pudo procesar el archivo: {ex}'), 400)
             except Exception:
                 self._error(f'No se pudo procesar el archivo: {ex}', 400)
+
+    def _entrar(self):
+        """Valida el formulario de acceso y abre la sesión."""
+        if hay_configuracion():
+            return self._error('El sitio no está configurado todavía.', 503)
+        try:
+            largo = int(self.headers.get('Content-Length') or 0)
+            campos = urllib.parse.parse_qs(
+                self.rfile.read(min(largo, 8192)).decode('utf-8', 'replace'))
+            usuario = (campos.get('usuario') or [''])[0].strip()
+            clave = (campos.get('clave') or [''])[0]
+        except Exception:
+            return self._pedir_clave('No se pudo leer el formulario. Intente de nuevo.')
+        if not usuario or not clave:
+            return self._pedir_clave('Escriba su usuario y su contraseña.', usuario)
+        if not verificar(usuario, clave):
+            # Frena los intentos por fuerza bruta sin castigar al que se
+            # equivoca una vez, y no dice cuál de los dos datos falló.
+            time.sleep(1.2)
+            return self._pedir_clave('Usuario o contraseña incorrectos.', usuario)
+        self._abrir_sesion(usuario)
 
     def log_message(self, fmt, *args):
         pass
