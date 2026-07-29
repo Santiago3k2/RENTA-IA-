@@ -94,7 +94,7 @@ CLIENTE = {{
     'porcentaje_anticipo':       {pct_anticipo},
 
     # ─────────── 3 · PATRIMONIO ───────────
-    'efectivo': ['Efectivo en caja', 'Efectivo en caja menor'],
+    'efectivo': ['Efectivo en caja'],
     'cuentas': {cuentas},
     'cdt': {cdt},
     'inversiones': {inversiones},

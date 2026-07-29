@@ -248,7 +248,7 @@ def build(wb, A, C, T):
     s.gap()
 
     # ══════════════ I · PASIVOS  (NOTA 9) ══════════════
-    s.section('I · PASIVOS — RENGLÓN R30 DEUDAS', accent=RED)
+    s.section('I · PASIVOS', accent=RED)
     s.head([('B', 'C', 'Acreedor', 'left'), ('D', 'E', 'Concepto', 'left'),
             ('F', None, 'Certificado', 'right'), ('G', None, 'Ajustes Fiscales', 'right'),
             ('H', None, 'Saldo', 'right')], accent=RED)

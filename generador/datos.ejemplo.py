@@ -46,7 +46,7 @@ CLIENTE = {
     'porcentaje_anticipo':       0.75,   # 0.25 primer año · 0.50 segundo · 0.75 tercero+
 
     # ─────────── 3 · PATRIMONIO ───────────
-    'efectivo': ['Efectivo en caja', 'Efectivo en caja menor'],
+    'efectivo': ['Efectivo en caja'],
 
     # (entidad y cuenta, tipo, saldo exógena o None)
     'cuentas': [
