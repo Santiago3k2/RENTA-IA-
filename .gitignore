@@ -1,0 +1,37 @@
+# ═══════════════════════════════════════════════════════════════
+#  DATOS DE CONTRIBUYENTES — NUNCA se suben al repositorio.
+#  Son datos tributarios de personas reales (Ley 1581 de 2012 y
+#  secreto profesional). Van en la base de datos, no en git.
+# ═══════════════════════════════════════════════════════════════
+clientes/
+subidas/
+referencia/
+plantilla/
+*.xlsx
+*.xls
+*.pdf
+
+# El datos.py de trabajo lleva datos de un contribuyente real.
+# En el repo solo viaja la plantilla anonimizada datos.ejemplo.py
+generador/datos.py
+
+# Credenciales
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+.vercel
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Sistema
+Thumbs.db
+.DS_Store
+~$*
+*.bak
