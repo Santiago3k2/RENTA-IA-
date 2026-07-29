@@ -86,11 +86,19 @@ def hay_configuracion():
     return faltan
 
 
+def normalizar_usuario(usuario):
+    """El nombre de usuario no es secreto, así que se perdonan los tropiezos
+    de tecleo: mayúsculas, espacios sobrantes o partidos («pruebapiloto 2026»).
+    La contraseña, en cambio, se respeta tal cual salvo espacios en los bordes.
+    """
+    return ''.join((usuario or '').split()).lower()
+
+
 def verificar(usuario, clave):
     """¿Coinciden usuario y contraseña? compare_digest evita filtrar la clave
     por el tiempo que tarda la comparación."""
-    esperada = credencial((usuario or '').strip())
-    return bool(esperada and hmac.compare_digest(clave or '', esperada))
+    esperada = credencial(normalizar_usuario(usuario))
+    return bool(esperada and hmac.compare_digest((clave or '').strip(), esperada))
 
 
 def autenticar(cabecera):
@@ -390,7 +398,7 @@ class handler(BaseHTTPRequestHandler):
             # equivoca una vez, y no dice cuál de los dos datos falló.
             time.sleep(1.2)
             return self._pedir_clave('Usuario o contraseña incorrectos.', usuario)
-        self._abrir_sesion(usuario, recordar)
+        self._abrir_sesion(normalizar_usuario(usuario), recordar)
 
     def log_message(self, fmt, *args):
         pass
