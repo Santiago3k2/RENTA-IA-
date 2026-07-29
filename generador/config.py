@@ -40,11 +40,17 @@ def leer_env(ruta=RUTA_ENV):
 
 
 def ajustes():
-    """.env + variables de entorno (estas últimas tienen prioridad)."""
+    """.env + variables de entorno (estas últimas tienen prioridad).
+
+    Los valores se limpian de espacios y del BOM invisible que dejan Windows y
+    algunos paneles al pegar: un BOM al inicio de la clave la invalida entera y
+    el error que se ve es un 401 sin explicación.
+    """
     a = leer_env()
     for k in CLAVES:
-        if os.environ.get(k):
-            a[k] = os.environ[k]
+        v = os.environ.get(k)
+        if v:
+            a[k] = v.strip().lstrip('﻿').strip()
     return a
 
 

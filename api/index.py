@@ -43,9 +43,23 @@ import nube
 import render
 from render import e
 
+def env(nombre, defecto=''):
+    """Variable de entorno limpia.
+
+    Al pegarlas en el panel o cargarlas desde la consola se cuelan espacios,
+    saltos de línea y hasta el BOM invisible de Windows (\\ufeff). Con la
+    contraseña eso solo impide entrar, pero con el cupo tumbaba el módulo
+    entero: más vale limpiar aquí que depender de cómo se escribió el valor.
+    """
+    return (os.environ.get(nombre) or defecto).strip().lstrip('﻿').strip()
+
+
 ADMIN = 'admin'
 PILOTO = 'pruebapiloto2026'
-CUPO_PILOTO = int(os.environ.get('RENTA_IA_CUPO_PILOTO') or 5)
+try:
+    CUPO_PILOTO = int(env('RENTA_IA_CUPO_PILOTO') or 5)
+except ValueError:
+    CUPO_PILOTO = 5
 TIPO_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 # El piloto ve y procesa lo suyo; el contador ve toda la cartera.
@@ -56,16 +70,15 @@ PERFILES = {
 
 
 def credencial(usuario):
-    return os.environ.get(PERFILES[usuario]['clave_env'], '') if usuario in PERFILES else ''
+    return env(PERFILES[usuario]['clave_env']) if usuario in PERFILES else ''
 
 
 def hay_configuracion():
     """Faltantes de configuración; si hay alguno, el sitio no atiende."""
-    faltan = [p['clave_env'] for p in PERFILES.values() if not os.environ.get(p['clave_env'])]
-    if not os.environ.get('SUPABASE_URL'):
-        faltan.append('SUPABASE_URL')
-    if not os.environ.get('SUPABASE_SERVICE_ROLE_KEY'):
-        faltan.append('SUPABASE_SERVICE_ROLE_KEY')
+    faltan = [p['clave_env'] for p in PERFILES.values() if not env(p['clave_env'])]
+    for k in ('SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'):
+        if not env(k):
+            faltan.append(k)
     return faltan
 
 
