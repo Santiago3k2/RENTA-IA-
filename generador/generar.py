@@ -8,6 +8,7 @@ Uso:
 """
 import argparse
 import importlib.util
+import io
 import os
 import sys
 
@@ -33,13 +34,12 @@ def cargar_datos(ruta):
     return mod.CLIENTE, mod.TEXTOS
 
 
-def main():
-    ap = argparse.ArgumentParser(description='Generador del libro de declaración de renta')
-    ap.add_argument('--datos', default=os.path.join(BASE, 'datos.py'))
-    ap.add_argument('--salida', default=None)
-    args = ap.parse_args()
+def construir(C, T):
+    """Arma el libro de 9 hojas en memoria y devuelve (workbook, anclas).
 
-    C, T = cargar_datos(args.datos)
+    No toca el disco: así el mismo motor sirve para el escritorio y para las
+    funciones sin estado de Vercel.
+    """
     build_lib.set_identidad(C['nombre'], C['identificacion'], C['ano_gravable'])
 
     wb = openpyxl.Workbook()
@@ -82,13 +82,37 @@ def main():
     for nom, (hoja, col, fila) in nombres.items():
         wb.defined_names[nom] = DefinedName(nom, attr_text=f"'{hoja}'!${col}${fila}")
 
+    return wb, A
+
+
+def nombre_libro(C):
+    return f"Declaracion Renta AG{C['ano_gravable']} - {C['nombre_archivo']}.xlsx"
+
+
+def a_bytes(C, T):
+    """El libro como bytes, sin archivo intermedio (para servir o subir)."""
+    wb, _ = construir(C, T)
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+def main():
+    ap = argparse.ArgumentParser(description='Generador del libro de declaración de renta')
+    ap.add_argument('--datos', default=os.path.join(BASE, 'datos.py'))
+    ap.add_argument('--salida', default=None)
+    args = ap.parse_args()
+
+    C, T = cargar_datos(args.datos)
+    wb, A = construir(C, T)
+
     if args.salida:
         out = args.salida
     else:
         carpeta = os.path.join(os.path.dirname(BASE), 'clientes',
                                C['nombre_archivo'], f"AG{C['ano_gravable']}")
         os.makedirs(carpeta, exist_ok=True)
-        out = os.path.join(carpeta, f"Declaracion Renta AG{C['ano_gravable']} - {C['nombre_archivo']}.xlsx")
+        out = os.path.join(carpeta, nombre_libro(C))
     wb.save(out)
     print('OK ->', out)
     print('anclas:', dict(sorted(A.items())))

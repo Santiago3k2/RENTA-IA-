@@ -1,0 +1,28 @@
+# ═══════════════════════════════════════════════════════════════
+#  Nada de esto se sube a Vercel. Los datos de contribuyentes viven
+#  en Supabase (tablas y buckets privados), nunca en el despliegue.
+# ═══════════════════════════════════════════════════════════════
+clientes/
+subidas/
+referencia/
+plantilla/
+*.xlsx
+*.xls
+*.pdf
+
+# Credenciales: en Vercel van como variables de entorno.
+.env
+.env.*
+!.env.example
+
+# El datos.py de trabajo lleva datos de un contribuyente real.
+generador/datos.py
+
+# Herramientas que no corren en el servidor.
+*.ps1
+*.bat
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/

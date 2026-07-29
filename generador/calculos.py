@@ -52,7 +52,18 @@ def impuesto_241(base_uvt, uvt):
 
 
 def calcular(path):
+    """Cifras clave de un caso guardado en disco (clientes\\…\\datos.py)."""
     C, T = _load(path)
+    return calcular_dict(C, T)
+
+
+def calcular_dict(C, T=None):
+    """Igual, pero desde el diccionario del cliente ya cargado.
+
+    Es la puerta que usa la nube: en Supabase el caso vive como JSON, no como
+    archivo, y las cifras deben salir de este mismo motor y no de un cálculo
+    paralelo que se pueda desincronizar.
+    """
     uvt = C['uvt']
 
     # patrimonio
@@ -116,7 +127,7 @@ def calcular(path):
         semaforo = 'VERDE'
 
     return {
-        'cliente': C, 'textos': T,
+        'cliente': C, 'textos': T or {},
         'pat_bruto': pat_bruto, 'deudas': deudas, 'pat_liquido': pat_bruto - deudas,
         'ingresos': ing, 'r32': r32, 'r58': r58, 'r74': r74, 'incrngo': incr,
         'exentas_aceptadas': aceptadas, 'ded_1pct': ded1, 'rlg': rlg,

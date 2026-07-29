@@ -83,6 +83,11 @@ un semáforo automático por caso:
    del libro, exportable como hoja adicional o archivo para el prevalidador.
 4. **Web interna completa** — subida de archivos, estados (pendiente/en
    revisión/liberado), persistencia. Solo el contador la usa.
+   *Persistencia lista (jul-2026)*: `db.py` guarda contribuyentes,
+   declaraciones y alertas en Supabase, y los libros y exógenas en dos buckets
+   privados con URL firmada. `sincronizar.py` sube lo que hoy vive en
+   `clientes\`, es idempotente y respeta el estado de revisión que el caso ya
+   tenga en la nube. Falta exponer los estados en la interfaz.
 5. **Portal del cliente** — registro, subida directa, formulario de faltantes,
    notificaciones, descarga de la versión liberada.
 
@@ -112,6 +117,11 @@ Plantilla Renta\
       regresion.py         auto vs manual, cifra por cifra
       verificar.ps1        cifras clave + errores de fórmula en Excel real
       capturar.ps1         capturas PNG para revisión visual
+      casos.py             descubre los casos de clientes\ (web + nube)
+      config.py            lee el .env; dice qué falta sin conectarse
+      db.py                Supabase: tablas y Storage (solo stdlib)
+      sincronizar.py       sube los casos locales a la nube
+  db\esquema.sql        <- tablas, índices y RLS (pegar en el SQL Editor)
   web\app.py            <- RENTA IA: bandeja del contador + subida (puerto 8765)
   clientes\             <- una carpeta por contribuyente, una subcarpeta por año:
                            clientes\<Nombre>\AG2025\{datos.py, libro.xlsx, exógena}

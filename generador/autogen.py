@@ -264,6 +264,33 @@ def construir_datos_py(caso, fuente_archivo):
     return txt, _carpeta(nombre)
 
 
+def procesar_en_memoria(ruta_xlsx, nombre_original=None):
+    """Exógena → caso + libro, sin escribir nada en el proyecto.
+
+    Es la versión para las funciones sin estado de Vercel, donde no hay disco
+    persistente ni se puede lanzar un proceso aparte. Devuelve el libro como
+    bytes y el caso ya calculado, listos para guardarse en Supabase.
+    """
+    import generar
+
+    parsed = parser_exogena.leer(ruta_xlsx)
+    caso = clasificador.procesar(parsed)
+    txt, carpeta = construir_datos_py(caso, nombre_original or ruta_xlsx)
+
+    # El texto del datos.py es el mismo del modo escritorio, pero se evalúa en
+    # memoria: así la nube y el equipo local producen exactamente el libro.
+    ns = {}
+    exec(compile(txt, 'datos.py', 'exec'), ns)
+    C, T = ns['CLIENTE'], ns['TEXTOS']
+
+    return {'caso': caso, 'carpeta': carpeta, 'cliente': C, 'textos': T,
+            'datos_py': txt,
+            'libro_bytes': generar.a_bytes(C, T),
+            'nombre_libro': generar.nombre_libro(C),
+            'descuadres': caso['descuadres'],
+            'n_altas': sum(1 for a in caso['avisos'] if a[0] == 'ALTA')}
+
+
 def procesar_archivo(ruta_xlsx, salida_base=None):
     parsed = parser_exogena.leer(ruta_xlsx)
     caso = clasificador.procesar(parsed)
