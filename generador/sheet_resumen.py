@@ -9,6 +9,8 @@ from openpyxl.formatting.rule import FormulaRule
 from openpyxl.worksheet.datavalidation import DataValidation
 from build_lib import *
 
+import plazos
+
 AUT = 'Generador renta'
 
 TEXTO_DOC_TRABAJO = ('Liquidación propuesta elaborada sobre información exógena; no es un formulario oficial '
@@ -38,6 +40,7 @@ def populate(wb, A, C, T):
               'F': 13.0, 'G': 13.0, 'H': 15.0, 'I': 18.0})
     ag, ant, sig = C['ano_gravable'], C['ano_anterior'], C['ano_siguiente']
     dig = C['ultimos_digitos']
+    venc = plazos.vencimiento(ag, dig)      # None si no hay calendario para ese año
     PAT, ING = "'2. Patrimonio'", "'3. Ingresos'"
     RET, LIQ = "'4. Retenciones'", "'6. Liquidación'"
     ANT, CONS = "'5. Anticipo'", "'8. Consignaciones'"
@@ -269,7 +272,8 @@ def populate(wb, A, C, T):
     bloques = [
         (f'PLAZO PARA PRESENTAR LA DECLARACIÓN DE RENTA  ·  AÑO GRAVABLE {ag}  ·  ÚLTIMOS DOS DÍGITOS DEL DOCUMENTO: {dig}',
          F(8.0, True, color=ONDARK), AL('left', 'center'), 20.0),
-        (T['plazo_grande'], F(24.0, True, color=TEAL_ACC, name=GEO), AL('left', 'center'), 42.0),
+        (plazos.texto_grande(venc) if venc else T['plazo_grande'],
+         F(24.0, True, color=TEAL_ACC, name=GEO), AL('left', 'center'), 42.0),
     ]
     for k, (val, fnt, al, hh) in enumerate(bloques):
         rr = r + k
@@ -292,17 +296,30 @@ def populate(wb, A, C, T):
     fx.font = F(12.0, True, color=TEXT)
     fx.alignment = AL('center', 'center')
     fx.number_format = 'dd/mm/yyyy'
-    fx.comment = Comment(
-        f'Escriba aquí la fecha exacta de vencimiento que fije el decreto\n'
-        f'de plazos para los últimos dos dígitos {dig} del año gravable {ag}.', AUT, 300, 60)
-    s.put(rf, 'F', f'Tómela del decreto de plazos publicado por el Gobierno para el año gravable {ag}.',
-          F(9.0, False, True, ONDARK2), AL('left', 'center', True, 1), None, 'I')
+    if venc:
+        fx.value = venc
+        fx.comment = Comment(
+            f'Fecha tomada del calendario oficial de plazos del año gravable {ag}\n'
+            f'para los últimos dos dígitos {dig} del documento. Es editable: si el\n'
+            f'Gobierno modifica el decreto, corrija aquí y el conteo se ajusta solo.', AUT, 320, 70)
+        nota = (f'=IF(E{rf}="","",'
+                f'IF(TODAY()>E{rf},"Venció hace "&TEXT(TODAY()-E{rf},"0")&" día(s): ya corre la sanción por extemporaneidad.",'
+                f'IF(TODAY()=E{rf},"VENCE HOY.",'
+                f'"Faltan "&TEXT(E{rf}-TODAY(),"0")&" día(s) calendario. Declaración y pago.")))')
+    else:
+        fx.comment = Comment(
+            f'Escriba aquí la fecha exacta de vencimiento que fije el decreto\n'
+            f'de plazos para los últimos dos dígitos {dig} del año gravable {ag}.', AUT, 300, 60)
+        nota = f'Tómela del decreto de plazos publicado por el Gobierno para el año gravable {ag}.'
+    s.put(rf, 'F', nota, F(9.0, False, True, ONDARK2), AL('left', 'center', True, 1), None, 'I')
     rn = rf + 1
     for ci in range(2, 10):
         ws.cell(row=rn, column=ci).fill = FILL(INK)
     ws.row_dimensions[rn].height = 42.0
     s.put(rn, 'B',
-          f'La ventana ordinaria de las personas naturales residentes va de agosto a octubre; el día exacto depende de los dos últimos dígitos del documento —en este caso {dig}— y lo fija cada año el decreto de plazos. Confírmelo en el portal de la DIAN antes de programar el pago: presentar fuera de término genera sanción por extemporaneidad del 5% del impuesto por cada mes o fracción (art. 641 E.T.) más intereses de mora, y ninguna de las dos se puede evitar después.',
+          (f'Es la fecha que el calendario oficial del año gravable {ag} asigna a los documentos terminados en {dig}; en esa misma fecha vencen la presentación y el pago, no solo la presentación. Confírmela en el portal de la DIAN antes de programar el pago: presentar fuera de término genera sanción por extemporaneidad del 5% del impuesto por cada mes o fracción (art. 641 E.T.) más intereses de mora, y ninguna de las dos se puede evitar después.'
+           if venc else
+           f'La ventana ordinaria de las personas naturales residentes va de agosto a octubre; el día exacto depende de los dos últimos dígitos del documento —en este caso {dig}— y lo fija cada año el decreto de plazos. Confírmelo en el portal de la DIAN antes de programar el pago: presentar fuera de término genera sanción por extemporaneidad del 5% del impuesto por cada mes o fracción (art. 641 E.T.) más intereses de mora, y ninguna de las dos se puede evitar después.'),
           F(8.7, color=ONDARK2), AL('left', 'top', True, 1), None, 'I')
 
     ws.freeze_panes = 'A6'

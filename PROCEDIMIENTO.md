@@ -138,7 +138,11 @@ Revisar como mínimo: Resumen, Patrimonio, Liquidación y Alertas.
 
 - Todo total es **fórmula**; nunca valores pegados.
 - Lo editable va en **crema** (`FDF6E7` / borde `D9BE86`).
-- Fecha exacta del plazo y componente inflacionario: **casilla en blanco con
-  nota**, nunca un dato inventado.
+- Fecha exacta del plazo: sale del calendario oficial cargado en
+  `generador\plazos.py`, por los **dos últimos dígitos** del documento. Para un
+  año gravable que no esté en esa tabla —y para el componente inflacionario—
+  sigue siendo **casilla en blanco con nota**, nunca un dato inventado.
+  Al llegar el decreto de un año nuevo, se añade su bloque a `plazos.py` y se
+  regeneran los libros; el módulo exige las 100 combinaciones de dígitos.
 - Se dice **"caja"**, nunca "bóveda".
 - El archivo fuente de exógena no se modifica jamás.

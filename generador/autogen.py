@@ -21,6 +21,7 @@ sys.path.insert(0, BASE)
 
 import parser_exogena
 import clasificador
+import plazos
 
 
 def _sinacento(t):
@@ -259,7 +260,9 @@ def construir_datos_py(caso, fuente_archivo):
         ('ATENCIÓN: los totales reconstruidos NO coinciden con los topes de la DIAN — ' +
          ' · '.join(f'{k}: diferencia {v:+,.0f}'.replace(',', '.') for k, v in caso['descuadres'].items()) +
          '. Hay una partida mal clasificada: no libere el caso hasta cuadrarlo.'),
-        plazo=f'SE PRESENTA ENTRE AGOSTO Y OCTUBRE DE {ano_i + 1}' if ano_i else 'CONSULTE EL DECRETO DE PLAZOS',
+        plazo=(plazos.frase(ano_i, ident['identificacion'])
+               or (f'SE PRESENTA ENTRE AGOSTO Y OCTUBRE DE {ano_i + 1}' if ano_i
+                   else 'CONSULTE EL DECRETO DE PLAZOS')),
     )
     return txt, _carpeta(nombre)
 
