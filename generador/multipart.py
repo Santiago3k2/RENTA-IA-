@@ -11,6 +11,27 @@ import re
 # las dos formas para no rechazar un archivo válido por un detalle de formato.
 _FILENAME = re.compile(r'filename\s*=\s*(?:"([^"]*)"|([^;\r\n]*))', re.I)
 _BOUNDARY = re.compile(r'boundary=(?:"([^"]+)"|([^;]+))', re.I)
+_NOMBRE = re.compile(r'\bname\s*=\s*(?:"([^"]*)"|([^;\r\n]*))', re.I)
+
+
+def extraer_campo(cuerpo, nombre):
+    """Valor de un campo de texto del mismo envío, o None.
+
+    El formulario de subida lleva, además del archivo, el testigo anti-CSRF. El
+    cuerpo de la petición solo se puede leer una vez, así que hay que sacar los
+    dos de los mismos bytes en lugar de volver a pedirlos.
+    """
+    marca = ('name="%s"' % nombre).encode()
+    for parte in cuerpo.split(b'\r\n--'):
+        if b'\r\n\r\n' not in parte or marca not in parte:
+            continue
+        cab, datos = parte.split(b'\r\n\r\n', 1)
+        if b'filename' in cab:
+            continue                      # ese es el archivo, no un campo
+        m = _NOMBRE.search(cab.decode('utf-8', 'replace'))
+        if m and (m.group(1) or m.group(2) or '').strip() == nombre:
+            return datos.rstrip(b'\r\n-').decode('utf-8', 'replace')
+    return None
 
 
 def extraer_archivo(cuerpo, content_type):

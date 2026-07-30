@@ -95,6 +95,17 @@ text-transform:uppercase;margin-top:16px}
 .quien b{color:var(--ink);display:block;font-size:13px;font-weight:600}
 .quien a{color:var(--z500)}
 .quien a:hover{color:var(--ink)}
+.quien .rolete{display:inline-block;font-size:9.5px;font-weight:600;letter-spacing:.08em;
+text-transform:uppercase;color:var(--z500);border:1px solid var(--bord);border-radius:20px;
+padding:1px 8px;margin-top:3px}
+
+/* ── PESTAÑAS ── */
+.nav-wrap{max-width:1120px;margin:0 auto;padding:0 28px}
+.nav{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:-1px}
+.nav a{padding:10px 14px;font-size:13px;color:var(--z500);text-decoration:none;
+border-bottom:2px solid transparent;white-space:nowrap;transition:color .15s}
+.nav a:hover{color:var(--ink)}
+.nav a.act{color:var(--ink);font-weight:600;border-bottom-color:var(--tinta)}
 .stats{display:flex;margin-top:20px;border-top:1px solid var(--bord);padding-top:16px;flex-wrap:wrap}
 .stat{padding-right:32px;margin-right:32px;border-right:1px solid var(--bord)}
 .stat:last-child{border-right:none;margin-right:0;padding-right:0}
@@ -224,41 +235,47 @@ PIE_NUBE = ('<b>RENTA IA</b> · acceso restringido · información tributaria su
             'y se libera antes de presentarla a la DIAN')
 
 
-def hero(sub, stats_html='', usuario=''):
-    quien = (f'<div class="quien"><b>{e(usuario)}</b>sesión activa · '
-             f'<a href="/salir">salir</a></div>') if usuario else ''
+def hero(sub, stats_html='', usuario='', nav='', rol=''):
+    etiqueta = (f'<span class="rolete">{e(rol)}</span>' if rol else '')
+    quien = (f'<div class="quien"><b>{e(usuario)}</b>'
+             f'<a href="/cuenta">mi cuenta</a> · <a href="/salir">salir</a><br>'
+             f'{etiqueta}</div>') if usuario else ''
+    barra = f'<div class="nav-wrap"><div class="nav">{nav}</div></div>' if nav else ''
     return f"""<div class="hero">{quien}<div class="hero-in">
 <div class="marca"><div class="logo">R</div>
   <div><div class="wordmark">RENTA<span> IA</span></div><div class="lema">{LEMA}</div></div></div>
 <div class="hero-sub">{sub}</div>{stats_html}
-</div></div>"""
+</div>{barra}</div>"""
 
 
-def pagina(titulo, cuerpo, sub='', stats='', usuario='', pie=PIE_LOCAL):
+def pagina(titulo, cuerpo, sub='', stats='', usuario='', pie=PIE_LOCAL, nav='',
+           rol='', estilo_extra=''):
     return f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#FFFFFF">
-<title>{e(titulo)} · {MARCA}</title><style>{ESTILO}</style></head><body>
-{hero(sub, stats, usuario)}
+<meta name="robots" content="noindex,nofollow">
+<title>{e(titulo)} · {MARCA}</title><style>{ESTILO}{estilo_extra}</style></head><body>
+{hero(sub, stats, usuario, nav, rol)}
 <div class="wrap">{cuerpo}
 <footer>{pie}</footer>
 </div></body></html>"""
 
 
-def formulario(cupo=None):
+def formulario(cupo=None, token=''):
     """Zona de subida. `cupo` = (usadas, tope) para el usuario con límite."""
     if cupo and cupo[0] >= cupo[1]:
         return (f'<div class="subir"><h2>Procesar una exógena</h2>'
-                f'<p>Su cupo de prueba está completo: ha procesado '
+                f'<p>Su cupo está completo: ha procesado '
                 f'<b>{cupo[0]} de {cupo[1]}</b> declaraciones. Puede seguir '
                 f'consultando las que ya cargó; para ampliar el cupo, escriba al '
                 f'contador.</p></div>')
     aviso_cupo = ''
     if cupo:
         pct = int(cupo[0] * 100 / cupo[1]) if cupo[1] else 0
-        aviso_cupo = (f'<div class="cupo">Cupo de prueba: <b>{cupo[0]} de {cupo[1]}</b> '
+        aviso_cupo = (f'<div class="cupo">Cupo: <b>{cupo[0]} de {cupo[1]}</b> '
                       f'declaraciones procesadas.<div class="barrita">'
                       f'<i style="width:{pct}%"></i></div></div>')
+    campo = f'<input type="hidden" name="_t" value="{e(token)}">' if token else ''
     return f"""
 <div class="subir">
   <h2>Procesar una exógena</h2>
@@ -266,7 +283,7 @@ def formulario(cupo=None):
   RENTA IA lo lee, clasifica cada registro, valida los totales contra los topes precalculados
   por la DIAN y arma el libro de trabajo de 9 hojas. Si algo no cuadra, el caso queda en ROJO
   y le dice exactamente qué partida falla.</p>
-  <form method="post" action="/subir" enctype="multipart/form-data" id="f">
+  <form method="post" action="/subir" enctype="multipart/form-data" id="f">{campo}
     <label class="zona" id="z">
       <input type="file" name="archivo" id="a" accept=".xlsx" required>
       <div class="ic">&#128196;</div>
@@ -346,7 +363,8 @@ def _fila_ano(c, mostrar_estado):
 
 
 def vista_bandeja(lista, error='', extra='', usuario='', puede_subir=True,
-                  cupo=None, pie=PIE_LOCAL, mostrar_estado=False, sub=None):
+                  cupo=None, pie=PIE_LOCAL, mostrar_estado=False, sub=None,
+                  nav='', rol='', token='', aviso='', hecho=''):
     grupos = agrupar(lista)
     conteo = {'VERDE': 0, 'AMARILLO': 0, 'ROJO': 0}
     for c in lista:
@@ -376,7 +394,10 @@ def vista_bandeja(lista, error='', extra='', usuario='', puede_subir=True,
         '<div class="vacio">Todavía no hay casos. Suba una exógena para empezar.</div>')
     plural = 's' if len(grupos) != 1 else ''
     cuerpo = ((f'<div class="err">{e(error)}</div>' if error else '')
-              + (formulario(cupo) if puede_subir else '')
+              + (f'<div class="ok-msg">{e(hecho)}</div>' if hecho else '')
+              + (f'<div class="aviso" style="margin:0 0 20px">{e(aviso)}</div>'
+                 if aviso else '')
+              + (formulario(cupo, token) if puede_subir else '')
               + extra
               + f'<div class="barra"><h2>Contribuyentes</h2>'
                 f'<span class="cuenta" id="cuenta">{len(grupos)} contribuyente{plural}</span>'
@@ -385,10 +406,11 @@ def vista_bandeja(lista, error='', extra='', usuario='', puede_subir=True,
     return pagina('Bandeja', cuerpo,
                   sub or 'BANDEJA DEL CONTADOR &nbsp;&middot;&nbsp; CADA CASO SE VALIDA '
                          'CONTRA LOS TOPES DE LA DIAN',
-                  stats, usuario, pie)
+                  stats, usuario, pie, nav, rol)
 
 
-def vista_caso(caso, tolerancia, usuario='', pie=PIE_LOCAL, mostrar_estado=False):
+def vista_caso(caso, tolerancia, usuario='', pie=PIE_LOCAL, mostrar_estado=False,
+               nav='', rol='', acciones='', estilo_extra=''):
     c, C = caso['calc'], caso['C']
     ref = caso['ref']
     color, etiqueta, explica = SEM[c['semaforo']]
@@ -473,8 +495,9 @@ def vista_caso(caso, tolerancia, usuario='', pie=PIE_LOCAL, mostrar_estado=False
 <div class="aviso"><b>Estas cifras las calcula el validador</b> con los datos de la exógena tal cual.
 El libro de Excel es el papel de trabajo definitivo: sus casillas de fondo crema quedan abiertas
 para los certificados del contribuyente, y al diligenciarlas el libro se recalcula solo. Esta vista
-no reemplaza esa revisión.</div>"""
+no reemplaza esa revisión.</div>{acciones}"""
     return pagina(C.get('nombre_titulo', caso['persona']), cuerpo,
                   f"{e(C.get('identificacion', ''))} &nbsp;&middot;&nbsp; AÑO GRAVABLE "
                   f"{e(C.get('ano_gravable', ''))} &nbsp;&middot;&nbsp; "
-                  f"{e(C.get('fuente', '')).upper()}", '', usuario, pie)
+                  f"{e(C.get('fuente', '')).upper()}", '', usuario, pie, nav, rol,
+                  estilo_extra)

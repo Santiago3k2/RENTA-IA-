@@ -160,6 +160,23 @@ button.continuar[disabled]{opacity:.6; cursor:progress}
 .mayus.ver{display:block}
 .reserva{font-size:11.5px; color:var(--z400); text-align:center; line-height:1.6}
 
+/* pantallas con más campos que la de acceso */
+.card.ancha{max-width:470px}
+.centro.alto{align-items:start; padding:88px 16px 40px; overflow-y:auto}
+.par{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+.rel.simple input{padding-left:12px}
+.ok-aviso{display:flex; gap:8px; align-items:flex-start; background:#F3F8F5;
+  border:1px solid #CFE3D8; color:#14532D; border-radius:8px; padding:10px 12px; font-size:13px}
+.medidor{height:4px; background:var(--z200); border-radius:3px; overflow:hidden; margin-top:2px}
+.medidor i{display:block; height:100%; width:0; background:var(--z400);
+  transition:width .2s, background .2s}
+.medidor.f1 i{width:25%; background:#B42318} .medidor.f2 i{width:50%; background:#8D6209}
+.medidor.f3 i{width:75%; background:#1D5A8C} .medidor.f4 i{width:100%; background:#1C6F43}
+.fuerza-txt{font-size:11.5px; color:var(--z500)}
+.reglas{font-size:11.5px; color:var(--z500); line-height:1.6; margin-top:-2px}
+.volver{text-align:center; font-size:13px; margin-top:2px}
+.volver a{color:var(--z600)}
+
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none !important; transition:none !important}
   .card{opacity:1; transform:none}
@@ -169,6 +186,7 @@ button.continuar[disabled]{opacity:.6; cursor:progress}
 @media(max-width:420px){
   .card-header{padding:20px 18px 0} .card-content{padding:18px} .card-footer{padding:0 18px 18px}
   header{padding:12px 16px}
+  .par{grid-template-columns:1fr}
 }
 """
 
@@ -187,7 +205,7 @@ IC_OJO = ('<svg id="ojo-abierto" viewBox="0 0 24 24" aria-hidden="true">'
           '<path d="M6.6 6.6A18 18 0 0 0 2 12s3.5 7 10 7a10.8 10.8 0 0 0 5.4-1.4"/>'
           '<path d="M2 2l20 20"/></svg>')
 
-GUION = """
+GUION_FONDO = """
 (function(){
   // ── partículas ascendentes ────────────────────────────────────
   var lienzo = document.getElementById('particulas');
@@ -226,10 +244,18 @@ GUION = """
     window.addEventListener('resize', function(){ medir(); iniciar(); });
   }
 
+})();
+"""
+
+# Solo tiene sentido donde hay una contraseña que escribir; las tres pantallas
+# (acceso, registro y cambio) comparten este comportamiento.
+GUION_CLAVE = """
+(function(){
   // ── mostrar u ocultar la contraseña ───────────────────────────
   var f = document.getElementById('f'), b = document.getElementById('b'),
       c = document.getElementById('clave'), ojo = document.getElementById('ojo'),
       mayus = document.getElementById('mayus');
+  if (!c || !ojo) return;
   ojo.addEventListener('click', function(){
     var oculta = c.type === 'password';
     c.type = oculta ? 'text' : 'password';
@@ -249,23 +275,67 @@ GUION = """
   c.addEventListener('keyup', revisar);
   c.addEventListener('blur', function(){ mayus.classList.remove('ver'); });
 
-  f.addEventListener('submit', function(ev){
-    if (!f.usuario.value.trim() || !f.clave.value) { ev.preventDefault(); return; }
-    b.disabled = true; b.textContent = 'Verificando…';
+  if (f && b) f.addEventListener('submit', function(ev){
+    if (f.usuario && (!f.usuario.value.trim() || !f.clave.value)) { ev.preventDefault(); return; }
+    b.disabled = true; b.textContent = b.dataset.esperando || 'Verificando…';
   });
 })();
 """
 
+# Medidor de fuerza y aviso de contraseñas que no coinciden. Es una ayuda visual:
+# la validación de verdad la hace el servidor, que es el único que no se puede
+# saltar desde el navegador.
+GUION_FUERZA = """
+(function(){
+  var c = document.getElementById('clave'), r = document.getElementById('repetir'),
+      m = document.getElementById('medidor'), t = document.getElementById('fuerza'),
+      avisoR = document.getElementById('aviso-repetir');
+  if (!c || !m) return;
+  var nombres = ['Muy débil','Débil','Aceptable','Buena','Fuerte'];
+  function medir(){
+    var v = c.value, p = 0;
+    if (v.length >= 10) p++;
+    if (v.length >= 14) p++;
+    var distintos = {}; for (var i = 0; i < v.length; i++) distintos[v[i]] = 1;
+    if (Object.keys(distintos).length >= 8) p++;
+    var clases = 0;
+    if (/[a-záéíóúñ]/.test(v)) clases++;
+    if (/[A-ZÁÉÍÓÚÑ]/.test(v)) clases++;
+    if (/[0-9]/.test(v)) clases++;
+    if (/[^a-zA-Z0-9áéíóúñÁÉÍÓÚÑ]/.test(v)) clases++;
+    if (clases >= 3) p++;
+    m.className = 'medidor f' + (v ? p : 0);
+    t.textContent = v ? nombres[p] : '';
+    comparar();
+  }
+  function comparar(){
+    if (!r || !avisoR) return;
+    avisoR.textContent = (r.value && r.value !== c.value)
+      ? 'Las dos contraseñas no coinciden.' : '';
+    avisoR.style.color = '#B42318';
+  }
+  c.addEventListener('input', medir);
+  if (r) r.addEventListener('input', comparar);
+})();
+"""
 
-def pagina(mensaje='', usuario=''):
-    """La pantalla de acceso. `mensaje` se muestra como error si viene."""
-    error = (f'<div class="error" role="alert"><span aria-hidden="true">&#9888;</span>'
-             f'<span>{e(mensaje)}</span></div>') if mensaje else ''
+
+CORREO = 'santiagotrek2@gmail.com'
+
+
+def _marco(titulo, tarjeta, guiones=(), ancha=False, alto=False):
+    """El fondo compartido por las tres pantallas de fuera de la aplicación.
+
+    Las líneas, las partículas y la cabecera son las mismas siempre; lo único
+    que cambia es la tarjeta del centro. Así entrar, registrarse y cambiar la
+    contraseña se sienten el mismo sitio y no tres formularios sueltos.
+    """
+    scripts = ''.join(f'<script>{g}</script>' for g in guiones)
     return f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <meta name="theme-color" content="#FAFAFA">
-<title>Acceso · RENTA IA</title><style>{ESTILO}</style></head><body>
+<title>{e(titulo)} · RENTA IA</title><style>{ESTILO}</style></head><body>
 <section class="pantalla">
   <div class="vineta"></div>
   <div class="accent-lines">
@@ -276,45 +346,70 @@ def pagina(mensaje='', usuario=''):
 
   <header>
     <span class="marca-min"><b>RENTA IA</b></span>
-    <a class="btn-contacto" href="mailto:santiagotrek2@gmail.com?subject=Acceso%20a%20RENTA%20IA">
+    <a class="btn-contacto" href="mailto:{CORREO}?subject=Acceso%20a%20RENTA%20IA">
       <span>Contacto</span>{IC_FLECHA}</a>
   </header>
 
-  <div class="centro">
-    <form class="card" method="post" action="/entrar" id="f" novalidate>
+  <div class="centro{' alto' if alto else ''}">{tarjeta}</div>
+</section>{scripts}
+</body></html>"""
+
+
+def _error(mensaje):
+    return (f'<div class="error" role="alert"><span aria-hidden="true">&#9888;</span>'
+            f'<span>{e(mensaje)}</span></div>') if mensaje else ''
+
+
+def _hecho(mensaje):
+    return (f'<div class="ok-aviso" role="status"><span aria-hidden="true">&#10003;</span>'
+            f'<span>{e(mensaje)}</span></div>') if mensaje else ''
+
+
+def _campo_clave(id_campo, etiqueta, autocomplete='current-password',
+                 con_ojo=True, autofocus=False, placeholder='••••••••'):
+    ojo = (f'<button type="button" class="ojo" id="ojo" aria-pressed="false"'
+           f' aria-label="Mostrar la contraseña">{IC_OJO}</button>') if con_ojo else ''
+    return f"""<div class="grupo">
+  <label for="{id_campo}">{e(etiqueta)}</label>
+  <div class="rel clave">{IC_CANDADO}
+    <input id="{id_campo}" name="{id_campo}" type="password" placeholder="{placeholder}"
+           required autocomplete="{autocomplete}" {'autofocus' if autofocus else ''}>
+    {ojo}
+  </div>
+</div>"""
+
+
+def pagina(mensaje='', usuario='', registro_abierto=False, hecho=''):
+    """La pantalla de acceso. `mensaje` se muestra como error si viene."""
+    pie = ('¿No tiene cuenta?<b><a href="/registrarse" style="color:inherit">'
+           'Regístrese aquí</a></b>' if registro_abierto else
+           '¿No tiene acceso?<b>Solicítelo al contador</b>')
+    tarjeta = f"""<form class="card" method="post" action="/entrar" id="f" novalidate>
       <div class="card-header">
         <h1>Bienvenido de nuevo</h1>
         <p>Ingrese a su cuenta</p>
       </div>
 
       <div class="card-content">
-        {error}
+        {_hecho(hecho)}{_error(mensaje)}
         <div class="grupo">
           <label for="usuario">Usuario</label>
           <div class="rel">{IC_USUARIO}
-            <input id="usuario" name="usuario" type="text" placeholder="admin" required
+            <input id="usuario" name="usuario" type="text" placeholder="su usuario" required
                    autocomplete="username" autocapitalize="none" autocorrect="off"
                    spellcheck="false" value="{e(usuario)}" {'' if usuario else 'autofocus'}>
           </div>
         </div>
 
-        <div class="grupo">
-          <label for="clave">Contraseña</label>
-          <div class="rel clave">{IC_CANDADO}
-            <input id="clave" name="clave" type="password" placeholder="••••••••" required
-                   autocomplete="current-password" {'autofocus' if usuario else ''}>
-            <button type="button" class="ojo" id="ojo" aria-pressed="false"
-                    aria-label="Mostrar la contraseña">{IC_OJO}</button>
-          </div>
-          <div class="mayus" id="mayus">Bloqueo de mayúsculas activado.</div>
-        </div>
+        {_campo_clave('clave', 'Contraseña', autofocus=bool(usuario))}
+        <div class="mayus" id="mayus">Bloqueo de mayúsculas activado.</div>
 
         <div class="fila">
           <span class="recordar">
             <input type="checkbox" id="recordar" name="recordar" value="1">
             <label for="recordar">Recordarme</label>
           </span>
-          <a class="ayuda" href="mailto:santiagotrek2@gmail.com?subject=Clave%20de%20RENTA%20IA">
+          <a class="ayuda" href="mailto:{CORREO}?subject=Clave%20de%20RENTA%20IA">
             ¿Olvidó su contraseña?</a>
         </div>
 
@@ -324,9 +419,126 @@ def pagina(mensaje='', usuario=''):
           El acceso queda registrado.</p>
       </div>
 
-      <div class="card-footer">¿No tiene acceso?<b>Solicítelo al contador</b></div>
-    </form>
-  </div>
-</section>
-<script>{GUION}</script>
-</body></html>"""
+      <div class="card-footer">{pie}</div>
+    </form>"""
+    return _marco('Acceso', tarjeta, (GUION_FONDO, GUION_CLAVE))
+
+
+def pagina_registro(mensaje='', valores=None, min_clave=10, aprobacion=False):
+    """Alta de una cuenta nueva desde la calle.
+
+    Se piden pocos datos a propósito: el usuario, con qué entrar y por dónde
+    avisarle. Lo demás —rol y cupo— lo decide el sistema, nunca el formulario.
+    """
+    v = valores or {}
+    nota_final = ('Su cuenta quedará <b>a la espera de aprobación</b>: el contador '
+                  'la revisa y le avisa por correo.' if aprobacion else
+                  'Podrá entrar de inmediato. El número de declaraciones que puede '
+                  'procesar lo fija el contador.')
+    tarjeta = f"""<form class="card ancha" method="post" action="/registrarse" id="f" novalidate>
+      <div class="card-header">
+        <h1>Crear una cuenta</h1>
+        <p>Para preparar su declaración de renta</p>
+      </div>
+
+      <div class="card-content">
+        {_error(mensaje)}
+        <div class="par">
+          <div class="grupo">
+            <label for="usuario">Usuario</label>
+            <div class="rel">{IC_USUARIO}
+              <input id="usuario" name="usuario" type="text" placeholder="juan.perez" required
+                     autocomplete="username" autocapitalize="none" autocorrect="off"
+                     spellcheck="false" maxlength="32" value="{e(v.get('usuario', ''))}" autofocus>
+            </div>
+          </div>
+          <div class="grupo">
+            <label for="telefono">Teléfono <span style="font-weight:400;color:#A1A1AA">(opcional)</span></label>
+            <div class="rel simple">
+              <input id="telefono" name="telefono" type="text" placeholder="300 000 0000"
+                     autocomplete="tel" maxlength="40" value="{e(v.get('telefono', ''))}">
+            </div>
+          </div>
+        </div>
+
+        <div class="grupo">
+          <label for="nombre">Nombre completo</label>
+          <div class="rel simple">
+            <input id="nombre" name="nombre" type="text" placeholder="Juan Pérez Gómez" required
+                   autocomplete="name" maxlength="120" value="{e(v.get('nombre', ''))}">
+          </div>
+        </div>
+
+        <div class="grupo">
+          <label for="correo">Correo electrónico</label>
+          <div class="rel simple">
+            <input id="correo" name="correo" type="email" placeholder="juan@ejemplo.com" required
+                   autocomplete="email" autocapitalize="none" spellcheck="false"
+                   maxlength="160" value="{e(v.get('correo', ''))}">
+          </div>
+        </div>
+
+        {_campo_clave('clave', 'Contraseña', 'new-password', placeholder='mínimo %d caracteres' % min_clave)}
+        <div class="medidor" id="medidor"><i></i></div>
+        <div class="fuerza-txt" id="fuerza"></div>
+        <div class="mayus" id="mayus">Bloqueo de mayúsculas activado.</div>
+        <p class="reglas">Al menos {min_clave} caracteres. Una frase que recuerde
+        —«mesa verde 2026 sol»— resiste mucho más que ocho caracteres raros.
+        No puede contener su usuario ni su nombre.</p>
+
+        {_campo_clave('repetir', 'Repita la contraseña', 'new-password', con_ojo=False)}
+        <div class="fuerza-txt" id="aviso-repetir"></div>
+
+        <button type="submit" class="continuar" id="b" data-esperando="Creando la cuenta…">
+          Crear la cuenta</button>
+
+        <p class="reserva">{nota_final}<br>
+          Sus datos quedan amparados por la reserva del artículo 583 del Estatuto Tributario.</p>
+      </div>
+
+      <div class="card-footer">¿Ya tiene cuenta?<b><a href="/entrar" style="color:inherit">Entre aquí</a></b></div>
+    </form>"""
+    return _marco('Crear una cuenta', tarjeta,
+                  (GUION_FONDO, GUION_CLAVE, GUION_FUERZA), ancha=True, alto=True)
+
+
+def pagina_clave(usuario, token, mensaje='', min_clave=10):
+    """Cambio obligatorio: la cuenta entró con una contraseña que le asignaron.
+
+    No se deja seguir a ninguna otra página hasta que la cambie. Una clave que
+    pasó por un tercero —aunque ese tercero sea el contador— no es un secreto.
+    """
+    tarjeta = f"""<form class="card" method="post" action="/clave" id="f" novalidate>
+      <input type="hidden" name="_t" value="{e(token)}">
+      <div class="card-header">
+        <h1>Elija su contraseña</h1>
+        <p>Entró con una contraseña provisional</p>
+      </div>
+
+      <div class="card-content">
+        {_error(mensaje)}
+        <p class="reglas" style="margin:0">La contraseña con la que acaba de entrar se la
+        asignó el administrador, así que él la conoce. Elija una que solo sepa usted;
+        es la última pantalla antes de continuar.</p>
+
+        {_campo_clave('actual', 'Contraseña provisional', 'current-password',
+                      con_ojo=False, autofocus=True)}
+        {_campo_clave('clave', 'Contraseña nueva', 'new-password',
+                      placeholder='mínimo %d caracteres' % min_clave)}
+        <div class="medidor" id="medidor"><i></i></div>
+        <div class="fuerza-txt" id="fuerza"></div>
+        <div class="mayus" id="mayus">Bloqueo de mayúsculas activado.</div>
+
+        {_campo_clave('repetir', 'Repita la contraseña nueva', 'new-password', con_ojo=False)}
+        <div class="fuerza-txt" id="aviso-repetir"></div>
+
+        <button type="submit" class="continuar" id="b" data-esperando="Guardando…">
+          Guardar y continuar</button>
+
+        <p class="reserva">Al cambiarla se cierran las sesiones abiertas en otros equipos.</p>
+      </div>
+
+      <div class="card-footer">Sesión de<b>{e(usuario)}</b></div>
+    </form>"""
+    return _marco('Cambiar la contraseña', tarjeta,
+                  (GUION_FONDO, GUION_CLAVE, GUION_FUERZA), alto=True)

@@ -81,15 +81,26 @@ un semáforo automático por caso:
    tubería y redirige a la ficha del caso. Todo con librería estándar.
 3. **Borrador 210** — módulo `f210.py`: mapa renglón → valor desde las anclas
    del libro, exportable como hoja adicional o archivo para el prevalidador.
-4. **Web interna completa** — subida de archivos, estados (pendiente/en
-   revisión/liberado), persistencia. Solo el contador la usa.
-   *Persistencia lista (jul-2026)*: `db.py` guarda contribuyentes,
-   declaraciones y alertas en Supabase, y los libros y exógenas en dos buckets
-   privados con URL firmada. `sincronizar.py` sube lo que hoy vive en
-   `clientes\`, es idempotente y respeta el estado de revisión que el caso ya
-   tenga en la nube. Falta exponer los estados en la interfaz.
-5. **Portal del cliente** — registro, subida directa, formulario de faltantes,
-   notificaciones, descarga de la versión liberada.
+4. **Web interna completa** ✅ *(jul-2026)*
+   `db.py` guarda contribuyentes, declaraciones y alertas en Supabase, y los
+   libros y exógenas en dos buckets privados con URL firmada. `sincronizar.py`
+   sube lo que hoy vive en `clientes\`, es idempotente y respeta el estado de
+   revisión que el caso ya tenga en la nube. Los estados
+   (borrador / en revisión / liberada) se mueven desde la ficha del caso, y solo
+   los mueve quien ve toda la cartera.
+4b. **Cuentas y panel de administración** ✅ *(30-jul-2026)*
+   Los usuarios dejan de ser dos constantes en variables de entorno y pasan a
+   ser filas de `usuarios`, con contraseña cifrada (PBKDF2-SHA256, 600.000
+   iteraciones), rol, estado y cupo. Cualquiera puede registrarse; el
+   administrador aprueba, inhabilita, elimina, fija cupos y borra declaraciones
+   desde `/admin`. Todo queda escrito en `bitacora`, y `ajustes` permite abrir o
+   cerrar el registro sin volver a desplegar.
+   La lógica está en `generador\cuentas.py`, el HTML en `web\admin.py` y los
+   permisos en `api\index.py` — esa separación es deliberada: si una vista
+   empieza a decidir permisos, algo se coló donde no debía.
+5. **Portal del cliente** — el registro y la subida directa ya están; falta el
+   formulario de faltantes, las notificaciones por correo y la descarga de la
+   versión liberada como entregable distinto del papel de trabajo.
 
 ## Lo que nunca se automatiza
 
@@ -120,9 +131,17 @@ Plantilla Renta\
       casos.py             descubre los casos de clientes\ (web + nube)
       config.py            lee el .env; dice qué falta sin conectarse
       db.py                Supabase: tablas y Storage (solo stdlib)
+      cuentas.py           usuarios, contraseñas, roles, cupos, bitácora, ajustes
+      inicializar.py       prepara la nube para el sistema de cuentas
       sincronizar.py       sube los casos locales a la nube
+      pruebas_cuentas.py   regresión del sistema de cuentas
+      pruebas_web.py       regresión de extremo a extremo del sitio publicado
   db\esquema.sql        <- tablas, índices y RLS (pegar en el SQL Editor)
   web\app.py            <- RENTA IA: bandeja del contador + subida (puerto 8765)
+  web\render.py         <- el HTML de la bandeja, compartido por local y nube
+  web\login.py          <- acceso, registro y cambio de contraseña
+  web\admin.py          <- el HTML del panel de administración
+  api\index.py          <- el sitio publicado; también corre en local (8766)
   clientes\             <- una carpeta por contribuyente, una subcarpeta por año:
                            clientes\<Nombre>\AG2025\{datos.py, libro.xlsx, exógena}
   referencia\           <- patrones congelados para la suite de pruebas

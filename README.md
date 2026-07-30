@@ -45,11 +45,19 @@ generador/
   casos.py            descubre los casos de clientes/ (lo usan la web y la nube)
   config.py           lee el .env y diagnostica lo que falte
   db.py               Supabase: tablas + Storage, solo librería estándar
+  cuentas.py          usuarios: contraseñas, roles, cupos, bitácora y ajustes
+  inicializar.py      deja la nube lista para el sistema de cuentas
   sincronizar.py      sube los casos locales a la nube (idempotente)
-  pruebas.py          suite de regresión contra casos congelados
+  pruebas.py          regresión del motor, contra casos congelados
+  pruebas_cuentas.py  regresión del sistema de cuentas
+  pruebas_web.py      regresión de extremo a extremo del sitio publicado
   regresion.py        compara clasificación automática vs. manual
 db/esquema.sql        tablas, índices y RLS
 web/app.py            bandeja del contador (puerto 8765, o el de $PUERTO)
+web/render.py         el HTML de la bandeja, compartido por local y nube
+web/login.py          acceso, registro y cambio de contraseña
+web/admin.py          el HTML del panel de administración
+api/index.py          el sitio publicado (y `python index.py` para verlo en local)
 ```
 
 ## Uso local
@@ -97,28 +105,83 @@ HTML es el mismo de la versión local (`web/render.py`), así que la interfaz no
 se bifurca.
 
 Todo el sitio pide usuario y contraseña — son declaraciones de personas reales,
-sujetas a la reserva del art. 583 E.T. Dos usuarios:
-
-| Usuario | Ve | Puede procesar |
-|---|---|---|
-| `admin` | toda la cartera | sin límite |
-| `pruebapiloto2026` | solo lo que él mismo cargó | hasta 5 declaraciones |
-
-El cupo se comprueba en el servidor, no solo ocultando el botón, y un usuario
-restringido no puede sobrescribir un caso cargado por otro.
+sujetas a la reserva del art. 583 E.T.
 
 Variables de entorno que deben existir en Vercel:
 
 ```
 SUPABASE_URL                 la misma del .env
 SUPABASE_SERVICE_ROLE_KEY    la misma del .env
-RENTA_IA_CLAVE_ADMIN         contraseña de admin
-RENTA_IA_CLAVE_PILOTO        contraseña del piloto
-RENTA_IA_CUPO_PILOTO         opcional, por defecto 5
+RENTA_IA_CLAVE_ADMIN         contraseña del primer administrador
+RENTA_IA_SECRETO             recomendada: firma las sesiones
 ```
 
-Si falta cualquiera, el sitio responde 503 y no muestra nada: preferible fuera
-de servicio que abierto.
+Sin las dos de Supabase el sitio responde 503 y no muestra nada: preferible
+fuera de servicio que abierto.
+
+Para ver el sitio publicado tal cual, pero en el equipo:
+
+```bash
+cd api && python index.py      # → http://localhost:8766
+```
+
+## Cuentas y panel de administración
+
+Cada usuario es una fila de la tabla `usuarios`; nada de contraseñas en el
+código ni en variables de entorno. Cualquiera puede **registrarse** desde la
+pantalla de acceso, y el administrador decide desde el panel qué puede hacer.
+
+| Rol | Ve | Cupo |
+|---|---|---|
+| **Administrador** | toda la cartera, y maneja las cuentas | sin límite |
+| **Contador** | toda la cartera | sin límite |
+| **Cliente** | solo lo que él mismo carga | el que le fije el administrador |
+
+El **cupo** es cuántas declaraciones puede procesar esa cuenta en total. Se
+comprueba en el servidor, no ocultando el botón, y un cliente no puede
+sobrescribir un caso cargado por otro.
+
+El panel (`/admin`, solo para el rol administrador) tiene cinco secciones:
+
+- **Panel** — cuentas por aprobar, cuentas bloqueadas, cifras y últimos movimientos.
+- **Cuentas** — aprobar, inhabilitar, cambiar rol y cupo, editar datos,
+  restablecer la contraseña, cerrar sesiones a distancia y eliminar.
+- **Declaraciones** — todas las de la plataforma, con borrado que se lleva
+  también las alertas, el libro y la exógena del Storage.
+- **Bitácora** — quién entró, qué miró y qué borró, con la hora y la dirección IP.
+- **Ajustes** — abrir o cerrar el registro, exigir aprobación previa, fijar el
+  cupo con el que nace una cuenta y poner un aviso en la bandeja. Cambian el
+  sitio al instante, sin volver a publicarlo.
+
+Cómo se guardan las contraseñas: PBKDF2-HMAC-SHA256 con 600.000 iteraciones y
+sal propia por cuenta — el costo que recomienda OWASP. Nadie, ni el
+administrador, puede leer la contraseña de nadie; restablecerla genera una
+provisional que se muestra **una sola vez** y obliga a cambiarla al entrar.
+
+Otras defensas que conviene no deshacer sin pensarlo:
+
+- Al entrar se verifica la contraseña **antes** que el estado de la cuenta; al
+  revés, cualquiera podría inventariar qué cuentas existen sin saber ni una clave.
+- Cinco intentos fallidos bloquean la cuenta, y el bloqueo se duplica con cada
+  fallo nuevo hasta una hora.
+- Cada petición relee la cuenta: inhabilitar a alguien lo echa en el acto, no
+  cuando venza su cookie.
+- Toda acción que escribe exige un testigo anti-CSRF atado a la sesión, además
+  de la cookie `HttpOnly; Secure; SameSite=Lax`.
+- Nada irreversible ocurre por un enlace: borrar pasa por una pantalla de
+  confirmación que dice, con números, qué se va a perder.
+
+**Arranque.** `RENTA_IA_CLAVE_ADMIN` es el seguro contra quedarse fuera: si la
+tabla se quedara sin ningún administrador, el primer acceso vuelve a crear la
+cuenta `admin` con esa contraseña. Para preparar la nube por primera vez:
+
+```bash
+cd generador
+python inicializar.py            # dice qué falta, sin escribir nada
+python inicializar.py --aplicar  # crea lo que falte
+python pruebas_cuentas.py        # debe decir «TODAS LAS PRUEBAS PASAN»
+python pruebas_web.py            # recorre el sitio como un navegador
+```
 
 ## Alcance actual
 

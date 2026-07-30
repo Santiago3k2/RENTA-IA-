@@ -75,7 +75,7 @@ class Supabase:
 
     # ── transporte ──────────────────────────────────────────────────
     def _pedir(self, metodo, ruta, cuerpo=None, cabeceras=None, binario=None,
-               tipo='application/json'):
+               tipo='application/json', con_cabeceras=False):
         url = self.url + ruta
         datos = binario if binario is not None else (
             json.dumps(cuerpo, ensure_ascii=False).encode('utf-8') if cuerpo is not None else None)
@@ -87,17 +87,20 @@ class Supabase:
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
                 crudo = r.read()
+                recibidas = dict(r.headers)
         except urllib.error.HTTPError as ex:
             cuerpo_err = ex.read().decode('utf-8', 'replace')
             raise ErrorSupabase(_traducir(ex.code, cuerpo_err, url)) from None
         except urllib.error.URLError as ex:
             raise ErrorSupabase(f'No se pudo conectar con Supabase: {ex.reason}') from None
-        if not crudo:
-            return None
-        try:
-            return json.loads(crudo.decode('utf-8'))
-        except ValueError:
-            return crudo
+        if crudo:
+            try:
+                salida = json.loads(crudo.decode('utf-8'))
+            except ValueError:
+                salida = crudo
+        else:
+            salida = None
+        return (salida, recibidas) if con_cabeceras else salida
 
     # ── tablas ──────────────────────────────────────────────────────
     def seleccionar(self, tabla, **filtros):
@@ -126,8 +129,32 @@ class Supabase:
                            {'Prefer': 'return=representation'}) or []
 
     def borrar(self, tabla, **filtros):
+        if not filtros:
+            # Un DELETE sin filtro vacía la tabla entera. Es un error de
+            # programación tan caro que vale la pena atajarlo aquí.
+            raise ErrorSupabase('Borrado sin filtro: se negó por seguridad.')
         ruta = f'/rest/v1/{tabla}?' + urllib.parse.urlencode(filtros)
         return self._pedir('DELETE', ruta, cabeceras={'Prefer': 'return=minimal'})
+
+    def contar(self, tabla, **filtros):
+        """Cuántas filas cumplen el filtro, sin traérselas.
+
+        Se pide un rango vacío y se lee el total de la cabecera Content-Range
+        («0-0/9»). Traer las filas solo para medir su longitud funciona con
+        nueve declaraciones y deja de funcionar con nueve mil.
+        """
+        params = {'select': 'id'}
+        params.update(filtros)
+        ruta = f'/rest/v1/{tabla}?' + urllib.parse.urlencode(params)
+        _, cabeceras = self._pedir('GET', ruta, con_cabeceras=True, cabeceras={
+            'Prefer': 'count=exact', 'Range-Unit': 'items', 'Range': '0-0'})
+        rango = ''
+        for k, v in cabeceras.items():
+            if k.lower() == 'content-range':
+                rango = v
+                break
+        total = rango.partition('/')[2].strip()
+        return int(total) if total.isdigit() else 0
 
     def ping(self):
         """Comprueba credenciales y esquema. Devuelve texto de diagnóstico."""
@@ -169,6 +196,22 @@ class Supabase:
         # codificar; así como viene, la descarga falla.
         ruta, sep, consulta = firmada.partition('?')
         return self.url + '/storage/v1' + urllib.parse.quote(ruta, safe='/') + sep + consulta
+
+    def borrar_objeto(self, bucket, ruta_destino):
+        """Borra un archivo del bucket. No se queja si ya no estaba.
+
+        Al eliminar una declaración hay que llevarse el libro y la exógena: son
+        datos tributarios de una persona real y dejarlos sueltos en el Storage,
+        sin fila que los referencie, es peor que no haber borrado nada.
+        """
+        if not ruta_destino:
+            return False
+        destino = urllib.parse.quote(ruta_destino)
+        try:
+            self._pedir('DELETE', f'/storage/v1/object/{bucket}/{destino}')
+            return True
+        except ErrorSupabase:
+            return False
 
     # ── el caso completo ────────────────────────────────────────────
     def guardar_caso(self, calc, libro=None, exogena=None, estado=None,
@@ -258,6 +301,44 @@ class Supabase:
                                {'estado': 'liberada', 'liberada_por': por,
                                 'liberada_en': ahora},
                                id='eq.' + str(declaracion_id))
+
+    def cambiar_estado(self, declaracion_id, estado, por=None):
+        """Mueve el caso por el flujo de revisión: borrador → en_revision → liberada."""
+        if estado not in ('borrador', 'en_revision', 'liberada'):
+            raise ErrorSupabase(f'Estado desconocido: {estado}')
+        if estado == 'liberada':
+            return self.liberar(declaracion_id, por)
+        return self.actualizar('declaraciones',
+                               {'estado': estado, 'liberada_en': None,
+                                'liberada_por': None},
+                               id='eq.' + str(declaracion_id))
+
+    def eliminar_declaracion(self, declaracion_id):
+        """Borra el caso entero: fila, alertas, libro y exógena.
+
+        Devuelve lo que borró (para dejarlo escrito en la bitácora) o None si
+        ya no estaba. Las alertas se van solas por la cascada de la clave
+        foránea; los archivos del Storage no, hay que ir por ellos.
+
+        Si el contribuyente se queda sin ninguna declaración, también se
+        elimina: su nombre y su cédula están sujetos a reserva y no tiene
+        sentido conservarlos sin un caso al que pertenezcan.
+        """
+        filas = self.seleccionar(
+            'declaraciones',
+            select='id,ano_gravable,libro_path,exogena_path,creada_por,'
+                   'contribuyente_id,contribuyentes(nombre_titulo,identificacion)',
+            id='eq.' + str(declaracion_id))
+        if not filas:
+            return None
+        d = filas[0]
+        self.borrar_objeto(BUCKET_LIBROS, d.get('libro_path'))
+        self.borrar_objeto(BUCKET_EXOGENAS, d.get('exogena_path'))
+        self.borrar('declaraciones', id='eq.' + str(declaracion_id))
+        if d.get('contribuyente_id') and not self.contar(
+                'declaraciones', contribuyente_id='eq.' + d['contribuyente_id']):
+            self.borrar('contribuyentes', id='eq.' + d['contribuyente_id'])
+        return d
 
 
 if __name__ == '__main__':
