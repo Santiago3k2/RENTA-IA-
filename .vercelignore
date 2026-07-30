@@ -18,6 +18,11 @@ plantilla/
 # El datos.py de trabajo lleva datos de un contribuyente real.
 generador/datos.py
 
+# Las fichas del RST también, y en la web la ficha se arma con el formulario:
+# el servidor no necesita ninguna.
+rst/fichas/
+rst/caso_referencia.py
+
 # Herramientas que no corren en el servidor.
 *.ps1
 *.bat

@@ -195,12 +195,19 @@ def tag_estado(estado):
 
 
 def nav(activo, rol):
-    """Las pestañas. Solo las ve el administrador: para los demás no hay a dónde
-    ir desde la bandeja, y una barra con una sola pestaña es ruido."""
+    """Las pestañas.
+
+    Los dos apartados —Renta y RST— los ve todo el mundo: son los dos regímenes
+    que atiende la aplicación y cambiar entre ellos es la navegación principal.
+    El resto de pestañas es del administrador.
+    """
+    enlaces = [('/', 'Renta', 'bandeja'),
+               ('/rst', 'RST', 'rst')]
     if rol != 'admin':
-        return ''
-    enlaces = [('/', 'Bandeja', 'bandeja'),
-               ('/admin', 'Panel', 'panel'),
+        return ''.join(
+            f'<a href="{u}" class="{"act" if k == activo else ""}">{e(t)}</a>'
+            for u, t, k in enlaces)
+    enlaces += [('/admin', 'Panel', 'panel'),
                ('/admin/cuentas', 'Cuentas', 'cuentas'),
                ('/admin/declaraciones', 'Declaraciones', 'declaraciones'),
                ('/admin/bitacora', 'Bitácora', 'bitacora'),

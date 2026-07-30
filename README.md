@@ -52,9 +52,20 @@ generador/
   pruebas_cuentas.py  regresión del sistema de cuentas
   pruebas_web.py      regresión de extremo a extremo del sitio publicado
   regresion.py        compara clasificación automática vs. manual
+rst/                  módulo del Régimen Simple (ver rst/README.md)
+  parametros.py       UVT, tabla de tarifas del art. 908 ET y fundamento normativo
+  lector.py           consolidado de facturación electrónica → ventas, compras, PILA
+  calculos.py         liquidación del 2593 + validaciones + semáforo
+  libro.py            las 9 hojas del libro del SIMPLE, en memoria
+  generar.py          línea de comandos del módulo
+  nube.py             Supabase: recibos_rst y alertas_rst
+  pruebas.py          regresión contra el caso modelo
+  pruebas_web.py      regresión del apartado RST publicado
 db/esquema.sql        tablas, índices y RLS
+db/esquema_rst.sql    tablas propias del módulo RST
 web/app.py            bandeja del contador (puerto 8765, o el de $PUERTO)
 web/render.py         el HTML de la bandeja, compartido por local y nube
+web/rst_vista.py      el HTML del apartado RST
 web/login.py          acceso, registro y cambio de contraseña
 web/admin.py          el HTML del panel de administración
 api/index.py          el sitio publicado (y `python index.py` para verlo en local)
@@ -182,6 +193,19 @@ python inicializar.py --aplicar  # crea lo que falte
 python pruebas_cuentas.py        # debe decir «TODAS LAS PRUEBAS PASAN»
 python pruebas_web.py            # recorre el sitio como un navegador
 ```
+
+## Los dos apartados
+
+La aplicación atiende dos regímenes y la barra superior alterna entre ellos:
+
+- **Renta** — declaración anual de personas naturales desde la exógena de la DIAN.
+- **RST** — anticipo bimestral del Régimen Simple (Formulario 2593) desde el
+  consolidado de facturación electrónica. Tablas propias, porque la clave del
+  caso es (contribuyente, año, **bimestre**) y no (contribuyente, año).
+  `contribuyentes` sí se comparte: un mismo cliente puede estar en los dos.
+
+El alcance del RST son **solo los anticipos bimestrales**; la declaración anual
+del SIMPLE (Formulario 260) queda fuera por ahora.
 
 ## Alcance actual
 

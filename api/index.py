@@ -37,8 +37,11 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-for sub in ('generador', 'web'):
-    ruta = os.path.join(RAIZ, sub)
+# La raíz va también: el módulo RST es un paquete (`rst.…`) precisamente para
+# que sus módulos —que se llaman igual que los del motor de renta— no se pisen
+# con ellos dentro de este mismo proceso.
+for sub in ('generador', 'web', ''):
+    ruta = os.path.join(RAIZ, sub) if sub else RAIZ
     if ruta not in sys.path:
         sys.path.insert(0, ruta)
 
@@ -53,7 +56,13 @@ import login
 import multipart
 import nube
 import render
+import rst_vista
 from render import e
+
+from rst import generar as rst_generar
+from rst import libro as rst_libro
+from rst import nube as rst_nube
+from rst import parametros as rst_parametros
 
 
 def env(nombre, defecto=''):
@@ -342,8 +351,8 @@ class handler(BaseHTTPRequestHandler):
     def _testigo_ok(self, campos, ses):
         return hmac.compare_digest(str(campos.get('_t', '')), ses['testigo'])
 
-    def _nav(self, ses):
-        return vista_admin.nav('', ses['rol'])
+    def _nav(self, ses, activo='bandeja'):
+        return vista_admin.nav(activo, ses['rol'])
 
     # ══ GET ═════════════════════════════════════════════════════════
     def do_GET(self):
@@ -370,6 +379,14 @@ class handler(BaseHTTPRequestHandler):
                 return self._get_caso(ses, ruta.split('/')[2])
             if ruta.startswith('/libro/'):
                 return self._get_libro(ses, ruta.split('/')[2])
+            if ruta == '/rst':
+                return self._html(self._bandeja_rst(ses))
+            if ruta.startswith('/rst/libro/'):
+                return self._get_libro_rst(ses, ruta.split('/')[3])
+            if ruta.endswith('/eliminar') and ruta.startswith('/rst/'):
+                return self._eliminar_rst(ses, ruta.split('/')[2])
+            if ruta.startswith('/rst/'):
+                return self._get_recibo_rst(ses, ruta.split('/')[2])
             if ruta.startswith('/admin'):
                 if not ses['es_admin']:
                     return self._error('Esta sección es solo del administrador.', 403)
@@ -619,6 +636,221 @@ class handler(BaseHTTPRequestHandler):
             rol=vista_admin.ROL_NOMBRE.get(ses['rol'], ''), token=ses['testigo'],
             aviso=c.ajuste('mensaje_portada', '') or '')
 
+    # ══ Apartado RST — Régimen Simple ═══════════════════════════════
+    # Tablas propias (`recibos_rst`), porque la clave del caso es
+    # (contribuyente, año, bimestre). Alcance: solo los anticipos bimestrales
+    # del Formulario 2593; la declaración anual del SIMPLE queda fuera.
+
+    def _bandeja_rst(self, ses, error='', hecho=''):
+        lista = rst_nube.listar(ses['s'], solo_de=ses['solo_de'])
+        cupo = ses['cuentas'].cupo_de(ses['fila'])
+        return rst_vista.vista_bandeja(
+            lista, error=error, hecho=hecho, usuario=ses['usuario'], cupo=cupo,
+            pie=render.PIE_NUBE, mostrar_estado=True, nav=self._nav(ses, 'rst'),
+            rol=vista_admin.ROL_NOMBRE.get(ses['rol'], ''), token=ses['testigo'])
+
+    def _get_recibo_rst(self, ses, ref):
+        caso = rst_nube.buscar(ses['s'], ref, solo_de=ses['solo_de'])
+        if not caso:
+            return self._error('Ese recibo no existe o no es suyo.', 404)
+        self._html(rst_vista.vista_recibo(
+            caso, usuario=ses['usuario'], pie=render.PIE_NUBE, mostrar_estado=True,
+            nav=self._nav(ses, 'rst'),
+            rol=vista_admin.ROL_NOMBRE.get(ses['rol'], ''),
+            acciones=self._acciones_rst(ses, caso),
+            estilo_extra=vista_admin.ESTILO + rst_vista.ESTILO))
+
+    def _acciones_rst(self, ses, caso):
+        if ses['ve_todo']:
+            botones = []
+            for valor, texto in (('borrador', 'Devolver a borrador'),
+                                 ('en_revision', 'Marcar en revisión'),
+                                 ('liberada', 'Liberar')):
+                if valor == caso.get('estado'):
+                    continue
+                botones.append(
+                    f'<form method="post" action="/rst/{e(caso["ref"])}/estado">'
+                    f'<input type="hidden" name="_t" value="{e(ses["testigo"])}">'
+                    f'<input type="hidden" name="estado" value="{valor}">'
+                    f'<button class="mini sec" type="submit">{e(texto)}</button></form>')
+            return ('<div class="seccion" style="margin-top:22px"><h2>Revisión</h2>'
+                    '<div class="cuerpo"><p>Liberar deja constancia de que usted revisó '
+                    'este recibo y lo da por bueno. Es una marca de trabajo, no una '
+                    'presentación ante la DIAN.</p>'
+                    '<div class="acc-fila" style="justify-content:flex-start">'
+                    + ''.join(botones) + '</div></div></div>')
+        if caso.get('estado') == 'borrador' and caso.get('creada_por') == ses['usuario']:
+            return (f'<div class="seccion" style="margin-top:22px">'
+                    f'<h2>¿Se equivocó de archivo?</h2><div class="cuerpo">'
+                    f'<p>Puede eliminar este recibo mientras siga en borrador. Se borran '
+                    f'su libro y el consolidado que subió, y recupera el cupo.</p>'
+                    f'<form method="get" action="/rst/{e(caso["ref"])}/eliminar">'
+                    f'<button class="mini peligro" type="submit">Eliminar este recibo'
+                    f'</button></form></div></div>')
+        return ''
+
+    def _get_libro_rst(self, ses, ref):
+        caso = rst_nube.buscar(ses['s'], ref, solo_de=ses['solo_de'])
+        if not caso or not caso['fila'].get('libro_path'):
+            return self._error('Ese libro no existe o no es suyo.', 404)
+        ses['cuentas'].anotar('libro_rst_descargado', ses['usuario'], rol=ses['rol'],
+                              objeto=f"{caso['persona']} · {caso['periodo']}",
+                              ip=self._ip())
+        url = ses['s'].url_firmada(db.BUCKET_LIBROS, caso['fila']['libro_path'], 120)
+        self.send_response(302)
+        self.send_header('Location', url)
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+
+    def _eliminar_rst(self, ses, ref):
+        caso = rst_nube.buscar(ses['s'], ref, solo_de=ses['solo_de'])
+        if not caso:
+            return self._error('Ese recibo no existe o no es suyo.', 404)
+        if not ses['ve_todo'] and (caso.get('estado') != 'borrador'
+                                   or caso.get('creada_por') != ses['usuario']):
+            return self._error('Solo puede eliminar un recibo suyo que siga en '
+                               'borrador.', 403)
+        rst_nube.eliminar(ses['s'], ref)
+        ses['cuentas'].anotar('recibo_rst_eliminado', ses['usuario'], rol=ses['rol'],
+                              objeto=f"{caso['persona']} · {caso['periodo']}",
+                              ip=self._ip())
+        self._ir('/rst')
+
+    def _ficha_desde_formulario(self, crudo):
+        """Los campos del formulario → la ficha del contribuyente.
+
+        Es lo que el consolidado de la DIAN no trae y el motor no puede
+        adivinar: el grupo de actividad SIMPLE —que es una decisión de criterio,
+        no un dato— y la tarifa consolidada de ICA del municipio.
+        """
+        def campo(nombre, defecto=''):
+            v = multipart.extraer_campo(crudo, nombre)
+            return (v or defecto).strip()
+
+        nombre = campo('nombre')
+        nit = campo('nit')
+        if not nombre or not nit:
+            raise ValueError('Faltan la razón social o el NIT del contribuyente.')
+        try:
+            ano = int(campo('ano') or 0)
+            bimestre = int(campo('bimestre') or 0)
+            grupo = int(campo('grupo') or 0)
+        except ValueError:
+            raise ValueError('El año, el bimestre y el grupo deben ser números.')
+        if bimestre not in rst_parametros.BIMESTRES:
+            raise ValueError('El bimestre debe ir de 1 a 6.')
+        if grupo not in rst_parametros.TARIFAS:
+            raise ValueError('El grupo de actividad SIMPLE debe ir de 1 a 4.')
+        rst_parametros.uvt(ano)          # falla claro si no está cargada la UVT
+
+        # La tarifa de ICA se pide «por mil» porque así la publican los acuerdos
+        # municipales; guardarla como 12,5 en vez de 0,0125 es el error fácil.
+        crudo_ica = campo('tarifa_ica').replace(',', '.')
+        try:
+            por_mil = float(crudo_ica)
+        except ValueError:
+            raise ValueError('La tarifa de ICA no se entiende: escríbala por mil, '
+                             'por ejemplo 12,5.')
+        if por_mil > 1:
+            tarifa_ica = por_mil / 1000.0
+        else:
+            tarifa_ica = por_mil          # ya venía en decimal
+        if not 0 < tarifa_ica < 0.05:
+            raise ValueError('La tarifa de ICA queda fuera de todo rango razonable. '
+                             'Escríbala por mil, por ejemplo 12,5.')
+
+        return {
+            'nombre': nombre, 'nit': nit, 'dv': campo('dv'),
+            'direccion_seccional': campo('direccion_seccional'),
+            'ciiu': campo('ciiu'), 'ano': ano, 'bimestre': bimestre, 'grupo': grupo,
+            'responsable_iva': campo('responsable_iva', '1') == '1',
+            'municipio': campo('municipio'), 'cod_dane': campo('cod_dane'),
+            'depto': campo('depto'), 'tarifa_ica': tarifa_ica,
+            'incrngo': 0, 'ganancias_ocasionales': 0, 'devoluciones': 0,
+            'ingresos_no_gravados_ica': 0, 'retenciones_previas': 0,
+            'saldo_favor_iva_anterior': 0, 'inc': 0, 'sanciones': 0,
+        }
+
+    def _post_subir_rst(self, ses):
+        """Recibe el consolidado, liquida el bimestre en memoria y lo guarda."""
+        s, c = ses['s'], ses['cuentas']
+        try:
+            if ses['cupo'] is not None:
+                usadas = rst_nube.cuantos_lleva(s, ses['usuario'])
+                if usadas >= ses['cupo']:
+                    return self._html(self._bandeja_rst(
+                        ses, f'Su cupo está completo: {usadas} de {ses["cupo"]}. '
+                             f'Para ampliarlo, escriba al contador.'), 403)
+
+            largo = int(self.headers.get('Content-Length') or 0)
+            if largo <= 0:
+                raise ValueError('El envío llegó vacío.')
+            if largo > LIMITE_SUBIDA:
+                raise ValueError(
+                    'El consolidado supera los 4 MB que admite el servidor. Ábralo en '
+                    'Excel, deje solo las hojas F.VENTA, F.COMPRA, RETEIVA y S.SOCIAL, '
+                    'guárdelo de nuevo y reintente; o procéselo desde el equipo del '
+                    'contador, que no tiene ese tope.')
+            crudo = self.rfile.read(largo)
+
+            if not hmac.compare_digest(multipart.extraer_campo(crudo, '_t') or '',
+                                       ses['testigo']):
+                return self._error('La página caducó. Vuelva al apartado RST y '
+                                   'reintente la carga.', 400)
+
+            ficha = self._ficha_desde_formulario(crudo)
+            nombre, datos = multipart.extraer_archivo(
+                crudo, self.headers.get('Content-Type'))
+            if not nombre.lower().endswith('.xlsx'):
+                raise ValueError(f'«{nombre}» no es un .xlsx.')
+
+            with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+                tmp.write(datos)
+                temporal = tmp.name
+            try:
+                liq, wb = rst_generar.procesar(temporal, ficha)
+            finally:
+                try:
+                    os.unlink(temporal)
+                except OSError:
+                    pass
+
+            recibo = rst_nube.guardar_recibo(
+                s, ficha, liq, libro_bytes=rst_libro.a_bytes(wb),
+                nombre_libro=rst_generar.nombre_salida(ficha, liq),
+                consolidado_bytes=datos, nombre_consolidado=nombre,
+                creada_por=ses['usuario'], solo_si_dueno=ses['solo_de'])
+            c.anotar('recibo_rst_creado', ses['usuario'], rol=ses['rol'],
+                     objeto=f"{ficha['nombre']} · {liq['ano']} bim {liq['bimestre']}",
+                     detalle=f"semáforo {liq['semaforo']}", ip=self._ip())
+            self._ir('/rst/' + recibo['id'])
+        except db.ErrorPermiso as ex:
+            self._html(self._bandeja_rst(ses, str(ex)), 403)
+        except db.ErrorSupabase as ex:
+            self._html(self._bandeja_rst(ses, str(ex)), 502)
+        except Exception as ex:
+            try:
+                self._html(self._bandeja_rst(
+                    ses, f'No se pudo procesar el consolidado: {ex}'), 400)
+            except Exception:
+                self._error(f'No se pudo procesar el consolidado: {ex}', 400)
+
+    def _post_recibo_rst(self, ses, partes, campos):
+        """POST /rst/<id>/estado — mover el recibo por el flujo de revisión."""
+        ref = partes[2] if len(partes) > 2 else ''
+        accion = partes[3] if len(partes) > 3 else ''
+        if accion != 'estado':
+            return self._error('Esa acción no existe.', 404)
+        if not ses['ve_todo']:
+            return self._error('Solo el contador mueve el estado de un recibo.', 403)
+        estado = (campos or {}).get('estado', '')
+        if estado not in ('borrador', 'en_revision', 'liberada'):
+            return self._error('Estado desconocido.', 400)
+        rst_nube.cambiar_estado(ses['s'], ref, estado, por=ses['usuario'])
+        ses['cuentas'].anotar('recibo_rst_' + estado, ses['usuario'], rol=ses['rol'],
+                              objeto=ref, ip=self._ip())
+        self._ir('/rst/' + ref)
+
     # ══ POST ════════════════════════════════════════════════════════
     def do_POST(self):
         ruta = self._ruta()
@@ -631,7 +863,7 @@ class handler(BaseHTTPRequestHandler):
             ses = self._sesion(exigir_clave_al_dia=(ruta != '/clave'))
             if not ses:
                 return
-            campos = self._campos() if ruta != '/subir' else None
+            campos = self._campos() if ruta not in ('/subir', '/rst/subir') else None
             if campos is not None and not self._testigo_ok(campos, ses):
                 # Un formulario que no trae el testigo de esta sesión no salió
                 # de esta aplicación, o la sesión cambió mientras estaba abierto.
@@ -642,6 +874,10 @@ class handler(BaseHTTPRequestHandler):
                 return self._post_clave_forzada(ses, campos)
             if ruta == '/subir':
                 return self._post_subir(ses)
+            if ruta == '/rst/subir':
+                return self._post_subir_rst(ses)
+            if ruta.startswith('/rst/'):
+                return self._post_recibo_rst(ses, ruta.split('/'), campos)
             if ruta == '/cuenta/clave':
                 return self._post_mi_clave(ses, campos)
             if ruta.startswith('/caso/'):

@@ -15,6 +15,14 @@ plantilla/
 # En el repo solo viaja la plantilla anonimizada datos.ejemplo.py
 generador/datos.py
 
+# Las fichas del RST llevan la identificación de contribuyentes reales.
+# La plantilla `rst/fichas/ejemplo.py` sí se versiona.
+rst/fichas/*.py
+
+# El caso de referencia lleva cifras de un contribuyente real.
+rst/caso_referencia.py
+!rst/fichas/ejemplo.py
+
 # Credenciales
 .env
 .env.*

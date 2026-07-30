@@ -27,6 +27,7 @@ import config
 
 BUCKET_LIBROS = 'libros'
 BUCKET_EXOGENAS = 'exogenas'
+BUCKET_CONSOLIDADOS = 'consolidados'   # módulo RST: facturación electrónica
 TIPO_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 
@@ -166,7 +167,7 @@ class Supabase:
         """Crea los buckets privados si faltan. Idempotente."""
         creados = []
         existentes = {b.get('name') for b in (self._pedir('GET', '/storage/v1/bucket') or [])}
-        for nombre in (BUCKET_LIBROS, BUCKET_EXOGENAS):
+        for nombre in (BUCKET_LIBROS, BUCKET_EXOGENAS, BUCKET_CONSOLIDADOS):
             if nombre in existentes:
                 continue
             self._pedir('POST', '/storage/v1/bucket',
