@@ -17,6 +17,7 @@ from rst import generar
 from rst import lector
 from rst import libro
 from rst import parametros as P
+from rst import plazos
 
 # El caso de referencia —archivo fuente y cifras verificadas a mano— vive en
 # `rst\caso_referencia.py`, que NO se versiona: son datos de un contribuyente
@@ -91,6 +92,32 @@ def probar_caso_real():
     return liq, ficha
 
 
+def probar_plazos():
+    """El calendario del SIMPLE va por el ÚLTIMO dígito del NIT, uno solo.
+
+    En renta son los dos últimos: confundirlos daría fechas equivocadas, y una
+    fecha de vencimiento mal puesta cuesta sanción por extemporaneidad.
+    """
+    import datetime
+    check('bim 3, NIT terminado en 2', 
+          plazos.vencimiento(2026, 3, '901555552').toordinal(),
+          datetime.date(2026, 7, 10).toordinal(), 0)
+    check('bim 1, NIT terminado en 0',
+          plazos.vencimiento(2026, 1, '900000000').toordinal(),
+          datetime.date(2026, 5, 26).toordinal(), 0)
+    # El sexto bimestre se paga en enero del año SIGUIENTE.
+    f = plazos.vencimiento(2026, 6, '900000001')
+    check('bim 6 cae en enero del año siguiente', f.toordinal(),
+          datetime.date(2027, 1, 13).toordinal(), 0)
+    # El dígito de verificación no cuenta para el plazo.
+    if plazos.vencimiento(2026, 3, '901555552-7') != plazos.vencimiento(2026, 3, '901555552'):
+        fallos.append('el DV no debe alterar el plazo')
+    if plazos.vencimiento(2099, 1, '900000000') is not None:
+        fallos.append('un año sin calendario cargado debe devolver None, no inventar fecha')
+    if 'No hay calendario' not in plazos.texto(2099, 1, '900000000'):
+        fallos.append('sin calendario, el texto debe decirlo')
+
+
 def probar_modo_crudo():
     """Lo importante: el archivo crudo de la DIAN basta.
 
@@ -154,6 +181,7 @@ def main():
     resultado = probar_caso_real()
     if resultado:
         probar_libro(*resultado)
+    probar_plazos()
     probar_modo_crudo()
     probar_semaforo_rojo()
 

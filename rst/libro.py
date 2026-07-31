@@ -13,6 +13,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from . import parametros as P
+from . import plazos
 
 # Paleta del libro del SIMPLE (azul), distinta de la del libro de renta (verde):
 # son dos entregables diferentes y conviene que se distingan de un vistazo.
@@ -736,12 +737,24 @@ def hoja_liquidacion(wb, liq, ficha, A):
 
     _seccion(ws, 52, 'SEMÁFORO DE REVISIÓN Y PLAZO', 8)
     ws.merge_cells('B53:H53')
-    _c(ws, 'B53', 'Semáforo del motor: %s. %d punto(s) por verificar en la hoja 9. El recibo '
-                  'del bimestre %s de %d se presenta y paga en el mes siguiente al cierre, '
-                  'según el calendario del SIMPLE por los dos últimos dígitos del NIT.'
-       % (liq['semaforo'], len(liq['alertas']), liq['nombre_bimestre'].lower(), liq['ano']),
-       tam=9, ajuste=True, vert='center')
-    ws.row_dimensions[53].height = 30
+    _c(ws, 'B53', 'Semáforo del motor: %s. %d punto(s) por verificar en la hoja 9.'
+       % (liq['semaforo'], len(liq['alertas'])), tam=9, ajuste=True, vert='center')
+    ws.row_dimensions[53].height = 18
+    # La fecha exacta, no «el mes siguiente»: sale del calendario oficial por el
+    # último dígito del NIT. Al lado, los días que faltan, con TODAY().
+    vence = plazos.vencimiento(liq['ano'], liq['bimestre'], ficha['nit'])
+    ws.merge_cells('B54:E54')
+    _c(ws, 'B54', 'Plazo de declaración y pago', negrita=True, borde=True)
+    _c(ws, 'F54', vence if vence else '(sin calendario cargado)',
+       fmt='dd/mm/yyyy' if vence else None, negrita=True, alin='right',
+       fondo=CREMA, borde=True)
+    ws.merge_cells('G54:H54')
+    if vence:
+        _c(ws, 'G54', '=IF(F54-TODAY()<0,"Vencido hace "&TODAY()-F54&" día(s)",'
+                      '"Faltan "&F54-TODAY()&" día(s)")', tam=9, borde=True)
+    ws.merge_cells('B55:H55')
+    _c(ws, 'B55', plazos.texto(liq['ano'], liq['bimestre'], ficha['nit'])
+       + ' Se paga con el Formulario 490.', tam=9, ajuste=True)
     return ws
 
 

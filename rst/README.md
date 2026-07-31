@@ -22,6 +22,7 @@ python -m rst.pruebas_web      # regresión del apartado publicado
 | `calculos.py` | Liquidación completa en Python puro + validaciones + alertas + semáforo. |
 | `libro.py` | Las 9 hojas, en memoria (`construir` / `a_bytes`), listas también para la web. |
 | `generar.py` | Línea de comandos. |
+| `plazos.py` | Calendario oficial de vencimientos, por el **último dígito** del NIT. |
 | `nube.py` | Supabase: `recibos_rst` y `alertas_rst`, tablas propias del módulo. |
 | `fichas\` | Un archivo por contribuyente con lo que el consolidado no trae. Copiar `ejemplo.py`; las fichas reales no se versionan. |
 
@@ -110,11 +111,26 @@ Decisiones tomadas (30-jul-2026):
 - **Solo los anticipos bimestrales.** La declaración anual del SIMPLE
   (Formulario 260) queda fuera; de ahí `recibos_rst` y no `declaraciones_rst`.
 
+## Plazos
+
+El anticipo del SIMPLE vence según el **último dígito del NIT** —uno solo—,
+no según los dos últimos como en renta de personas naturales. Copiar la lógica
+del otro calendario daría fechas equivocadas, y una fecha mal puesta cuesta
+sanción por extemporaneidad.
+
+El calendario del año gravable 2026 está cargado en `plazos.py`, transcrito de
+la tabla oficial guardada en `referencia\calendario plazos RST.png`. Cada
+anticipo vence en el mes siguiente al cierre del bimestre; el del sexto se corre
+a **enero del año siguiente**. `_verificar()` exige las 60 combinaciones al
+importar: un dígito perdido revienta de una vez en vez de dejar una fecha en
+blanco o inventada.
+
+El libro escribe la fecha real en la hoja 1, editable, con una fórmula al lado
+que cuenta los días que faltan o los que lleva vencida.
+
 ## Pendiente
 
 - **Subida por la web**: el consolidado de 63 MB no pasa el tope de 4 MB de la
   plataforma. Por ahora el formulario lo dice y explica cómo adelgazarlo; la
   salida completa es procesarlo desde el escritorio.
-- **Calendario de plazos del SIMPLE**, distinto del de renta de personas
-  naturales. Falta el decreto o la tabla oficial: no se inventa.
 - Un segundo caso real, con otro grupo de actividad o varios municipios.

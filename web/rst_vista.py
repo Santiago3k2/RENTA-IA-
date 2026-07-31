@@ -239,6 +239,9 @@ def vista_recibo(caso, usuario='', pie=render.PIE_LOCAL, mostrar_estado=False,
 
     libro = (f'<a class="btn" href="/rst/libro/{e(caso["ref"])}">Descargar libro de 9 hojas</a>'
              if f.get('libro_path') else '')
+    plazo = (f.get('ficha') or {}).get('_plazo') or ''
+    aviso_plazo = (f'<div class="aviso" style="margin-bottom:18px"><b>Plazo:</b> {e(plazo)}</div>'
+                   if plazo else '')
     marca = ''
     if mostrar_estado:
         colr, txt = ESTADO_ET.get(caso.get('estado', 'borrador'), ESTADO_ET['borrador'])
@@ -246,6 +249,7 @@ def vista_recibo(caso, usuario='', pie=render.PIE_LOCAL, mostrar_estado=False,
 
     cuerpo = f"""
 <div class="migas"><a href="/rst">&larr; Volver a los recibos del SIMPLE</a></div>
+{aviso_plazo}
 <div class="cinta" style="--sem:{color}">
   <span class="chip" style="background:{color}">{e(sem)}</span>
   <span class="tit">{e(etiqueta)}</span><span class="des">{e(explica)}{marca}</span>{libro}</div>

@@ -21,6 +21,7 @@ if GEN not in sys.path:
 import db as db_renta                     # noqa: E402  (necesita el sys.path de arriba)
 
 from . import parametros as P             # noqa: E402
+from . import plazos                      # noqa: E402
 
 TABLA = 'recibos_rst'
 TABLA_ALERTAS = 'alertas_rst'
@@ -104,6 +105,8 @@ def guardar_recibo(s, ficha, liq, libro_bytes=None, nombre_libro=None,
         'nombre_titulo': ficha.get('nombre_titulo', nombre.title()),
     }, conflicto='identificacion')[0]
 
+    ficha = dict(ficha)
+    ficha['_plazo'] = plazos.texto(liq['ano'], liq['bimestre'], ficha['nit'])
     fila = {
         'contribuyente_id': contribuyente['id'],
         'ano_gravable': str(liq['ano']),
