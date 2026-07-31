@@ -48,6 +48,12 @@ FICHA = {
     'inc': 0,                       # impuesto al consumo, solo grupo 4
     'sanciones': 0,                 # extemporaneidad, si aplica
 
+    # Aporte TOTAL a pensión (16% del IBC) pagado dentro del bimestre, según la
+    # planilla PILA. El motor toma de ahí el 12% del empleador, que es lo único
+    # descontable (Art. 903 Par. 4 ET). Solo se usa si el archivo de la DIAN no
+    # trae el reporte de seguridad social, que es lo normal.
+    'aporte_pension_total': 0,
+
     # --- varios municipios: si se declara en más de uno, en vez de los campos
     # sueltos de arriba se puede dar la lista completa
     # 'municipios': [

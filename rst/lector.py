@@ -315,42 +315,204 @@ def _leer_seg_social(ws, avisos):
     return planillas
 
 
+# ------------------------------------------- modo crudo: solo Rp_Doc / Rp_Docpras
+
+def _derivar_ventas(ws, avisos, tarifa_iva, tarifa_reteiva):
+    """Ventas a partir del reporte crudo de documentos emitidos de la DIAN.
+
+    El reporte solo trae IVA y Total; el desglose se deduce, y da exacto:
+
+        gravado    = IVA ÷ tarifa general
+        no gravado = Total − gravado − IVA
+        ReteIVA    = IVA × tarifa de retención
+
+    Una factura íntegramente excluida de IVA cae sola en su sitio: IVA 0 →
+    gravado 0 y todo el total como no gravado.
+    """
+    enc = next(ws.iter_rows(max_row=1, values_only=True))
+    idx = _indices(enc)
+    for c in ('iva', 'total'):
+        if c not in idx:
+            raise ErrorLectura('El reporte de documentos emitidos no trae la columna %s.'
+                               % c.upper())
+
+    ventas, descartadas = [], 0
+    for f in _filas(ws):
+        tipo = str(f[idx.get('tipo de documento', 0)] or '')
+        tn = _norm(tipo)
+        if not tn:
+            continue
+        if any(tn.startswith(x) for x in NO_SON_INGRESO):
+            descartadas += 1
+            continue
+        signo = -1 if NOTA_CREDITO in tn else 1
+        iva = _num(f[idx['iva']])
+        total = _num(f[idx['total']])
+        gravado = iva / tarifa_iva if iva else 0.0
+        no_gravado = total - gravado - iva
+        # Redondeo de la división: por debajo de un peso es ruido de coma
+        # flotante, no un ingreso excluido.
+        if abs(no_gravado) < 1:
+            no_gravado = 0.0
+        ventas.append({
+            'tipo': tipo,
+            'fecha': _fecha(f[idx['fecha emision']] if 'fecha emision' in idx else None),
+            'prefijo': str(f[idx.get('prefijo', 3)] or '').strip(),
+            'folio': str(f[idx.get('folio', 2)] or '').strip(),
+            'nit': str(f[idx.get('nit receptor', 11)] or '').strip(),
+            'tercero': str(f[idx.get('nombre receptor', 12)] or '').strip(),
+            'gravado': signo * gravado,
+            'no_gravado': signo * no_gravado,
+            'iva': signo * iva,
+            'reteiva': signo * iva * tarifa_reteiva,
+            'total': signo * total,
+            'estado': str(f[idx.get('estado', -2)] or '').strip(),
+        })
+    if descartadas:
+        avisos.append('Del reporte de emitidos se excluyeron %d documentos que no son '
+                      'ingreso: documentos soporte con no obligados (son compras a '
+                      'personas naturales), nómina y acuses.' % descartadas)
+    return ventas
+
+
+def _derivar_compras(ws, avisos, tarifa_iva):
+    """Compras a partir del reporte crudo de documentos recibidos."""
+    enc = next(ws.iter_rows(max_row=1, values_only=True))
+    idx = _indices(enc)
+    if 'iva' not in idx or 'total' not in idx:
+        raise ErrorLectura('El reporte de documentos recibidos no trae IVA y Total.')
+
+    compras, acuses = [], 0
+    for f in _filas(ws):
+        tn = _norm(str(f[idx.get('tipo de documento', 0)] or ''))
+        if not tn:
+            continue
+        if tn.startswith('application response'):
+            acuses += 1          # son acuses de recibo, no documentos contables
+            continue
+        if tn.startswith('nomina') or tn.startswith('nómina'):
+            continue
+        signo = -1 if NOTA_CREDITO in tn else 1
+        iva = _num(f[idx['iva']])
+        compras.append({
+            'fecha': _fecha(f[idx['fecha emision']] if 'fecha emision' in idx else None),
+            'nit': str(f[idx.get('nit emisor', 9)] or '').strip(),
+            'proveedor': str(f[idx.get('nombre emisor', 10)] or '').strip(),
+            'prefijo': str(f[idx.get('prefijo', 3)] or '').strip(),
+            'folio': str(f[idx.get('folio', 2)] or '').strip(),
+            'base': signo * (iva / tarifa_iva if iva else 0.0),
+            'iva': signo * iva,
+            'total': signo * _num(f[idx['total']]),
+        })
+    if acuses:
+        avisos.append('Del reporte de recibidos se excluyeron %d «Application response»: '
+                      'son acuses de recibo, no documentos contables.' % acuses)
+    return compras
+
+
+def _derivar_reteiva(ventas, tarifa_reteiva):
+    """Conciliación por agente retenedor, agregando las ventas del bimestre.
+
+    El certificado que expide cada agente no está en ningún archivo de la DIAN:
+    la columna queda en cero y editable, y la diferencia se calcula sola cuando
+    el contador la diligencie.
+    """
+    por_nit = {}
+    for v in ventas:
+        if not v['iva']:
+            continue
+        clave = v['nit'] or v['tercero']
+        ag = por_nit.setdefault(clave, {'nit': v['nit'], 'tercero': v['tercero'],
+                                        'base': 0.0})
+        ag['base'] += v['iva']
+    agentes = []
+    for ag in sorted(por_nit.values(), key=lambda a: a['tercero']):
+        ag['contabilidad'] = round(ag['base'] * tarifa_reteiva, 2)
+        ag['certificado'] = 0.0
+        ag['diferencia'] = 0.0
+        agentes.append(ag)
+    return agentes
+
+
 # ------------------------------------------------------------------- fachada
 
-def leer(ruta):
-    """Consolidado → dict con ventas, compras, reteiva, seg_social y avisos."""
+def leer(ruta, tarifa_iva=0.19, tarifa_reteiva=0.15):
+    """Archivo de la DIAN → ventas, compras, reteiva, seg_social y avisos.
+
+    Acepta las dos formas del archivo:
+
+    * **crudo** — la exportación tal como la entrega la DIAN, con solo las hojas
+      `Rp_Doc_<fecha>` (emitidos) y `Rp_Docpras` (recibidos). Es el caso normal:
+      el motor deriva de ahí el desglose de ingresos, las compras y la
+      conciliación de ReteIVA.
+    * **trabajado** — un consolidado que ya trae `F.VENTA`, `F.COMPRA`, `RETEIVA`
+      y `S.SOCIAL` hechas a mano. Si están, se respetan: el trabajo del contador
+      manda sobre lo que el motor deduciría.
+    """
     avisos = []
     wb = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
     try:
         hv = _hoja(wb, 'F.VENTA')
         hc = _hoja(wb, 'F.COMPRA')
-        if hv is None:
-            raise ErrorLectura(
-                'El archivo no tiene la hoja F.VENTA. Hojas encontradas: %s'
-                % ', '.join(wb.sheetnames))
-        ventas, tot_ventas = _leer_ventas(hv, avisos)
-        if hc is not None:
-            compras, tot_compras = _leer_compras(hc, avisos)
+        emitidos = _hoja_prefijo(wb, 'Rp_Doc_')
+        recibidos = _hoja(wb, 'Rp_Docpras')
+
+        if hv is not None:
+            origen = 'trabajado'
+            ventas, tot_ventas = _leer_ventas(hv, avisos)
+            if hc is not None:
+                compras, tot_compras = _leer_compras(hc, avisos)
+            else:
+                compras, tot_compras = [], {}
+                avisos.append('El archivo no trae hoja F.COMPRA: el IVA descontable '
+                              'queda en cero.')
+        elif emitidos is not None:
+            origen = 'crudo'
+            ventas = _derivar_ventas(emitidos, avisos, tarifa_iva, tarifa_reteiva)
+            tot_ventas = {}
+            if recibidos is not None:
+                compras = _derivar_compras(recibidos, avisos, tarifa_iva)
+            else:
+                compras = []
+                avisos.append('El archivo no trae el reporte de documentos recibidos '
+                              '(Rp_Docpras): el IVA descontable queda en cero y hay que '
+                              'descargarlo aparte.')
+            tot_compras = {}
         else:
-            compras, tot_compras = [], {}
-            avisos.append('El archivo no trae hoja F.COMPRA: el IVA descontable queda en cero.')
+            raise ErrorLectura(
+                'El archivo no tiene ni la hoja de documentos emitidos (Rp_Doc_…) ni '
+                'una hoja F.VENTA ya trabajada. Hojas encontradas: %s'
+                % ', '.join(wb.sheetnames))
+
         hr = _hoja(wb, 'RETEIVA')
-        reteiva = _leer_reteiva(hr, avisos) if hr is not None else []
-        if hr is None:
-            avisos.append('El archivo no trae hoja RETEIVA: no hay conciliación de certificados.')
+        if hr is not None:
+            reteiva = _leer_reteiva(hr, avisos)
+        else:
+            reteiva = _derivar_reteiva(ventas, tarifa_reteiva)
+            if reteiva:
+                avisos.append('La conciliación de ReteIVA se armó agregando las facturas '
+                              'por agente retenedor. La columna del certificado queda en '
+                              'cero y editable: ese dato no está en ningún archivo de la '
+                              'DIAN y hay que tomarlo de los certificados.')
         hs = _hoja(wb, 'S.SOCIAL')
         seg = _leer_seg_social(hs, avisos) if hs is not None else []
         if hs is None:
-            avisos.append('El archivo no trae hoja S.SOCIAL: sin descuento por aportes a pensión.')
+            # La planilla de PILA no sale de la facturación electrónica: es otro
+            # sistema. Sin ella el anticipo queda MÁS ALTO de lo que debe, así
+            # que esto no es un detalle menor.
+            avisos.append('El archivo no trae el reporte de seguridad social (PILA): el '
+                          'descuento por aportes a pensión del empleador queda en cero y '
+                          'el anticipo sale más alto de lo debido. Añada las planillas en '
+                          'las filas amarillas de la hoja 7 y la liquidación se recalcula '
+                          'sola.')
 
-        emitidos = _hoja_prefijo(wb, 'Rp_Doc_')
         n_emitidos = len(_filas(emitidos)) if emitidos is not None else 0
-        recibidos = _hoja(wb, 'Rp_Docpras')
         n_recibidos = len(_filas(recibidos)) if recibidos is not None else 0
     finally:
         wb.close()
 
     return {
+        'origen': origen,
         'ventas': ventas,
         'compras': compras,
         'reteiva': reteiva,

@@ -143,7 +143,18 @@ def liquidar(ficha, fuente):
     ica = sum(f['ica'] for f in filas_ica)
 
     nacional = anticipo - ica
-    pension, planillas = _pension_empleador(fuente['seg_social'])
+    # La PILA es otro sistema y casi nunca viene con la facturación electrónica.
+    # Si el archivo no la trae, se acepta el aporte capturado en la ficha: sin
+    # él el anticipo sale más alto de lo que el contribuyente debe pagar.
+    planillas_fuente = fuente['seg_social']
+    if not planillas_fuente and float(ficha.get('aporte_pension_total', 0) or 0):
+        planillas_fuente = [{
+            'periodo': 'Capturado a mano', 'administradora': '(según planilla PILA)',
+            'fecha_pago': None, 'planilla': '', 'trabajadores': 0, 'dias_mora': 0,
+            'aporte': float(ficha['aporte_pension_total']), 'intereses': 0.0,
+            'total': float(ficha['aporte_pension_total']),
+        }]
+    pension, planillas = _pension_empleador(planillas_fuente)
     descuento_pension = min(pension, max(0, nacional))
     retenciones_previas = float(ficha.get('retenciones_previas', 0) or 0)
     anticipo_neto = max(0, nacional - descuento_pension - retenciones_previas)
@@ -205,6 +216,7 @@ def liquidar(ficha, fuente):
         'total': total,
         'total_mil': total_mil,
     }
+    liq['origen'] = fuente.get('origen', 'trabajado')
     liq['totales_declarados'] = fuente.get('totales_declarados', {})
     liq['validaciones'] = validar(liq, ficha, fuente)
     liq['alertas'] = alertas(liq, ficha, fuente)
@@ -221,29 +233,42 @@ def validar(liq, ficha, fuente):
     g, iva, rete = liq['ingresos_gravados'], liq['iva_generado'], liq['reteiva']
 
     razon_iva = iva / g if g else 0.0
+    derivado = fuente.get('origen') == 'crudo'
     v.append({
         'nombre': 'IVA generado ÷ ingresos gravados',
         'valor': razon_iva, 'esperado': P.TARIFA_IVA, 'formato': '%',
-        'ok': abs(razon_iva - P.TARIFA_IVA) <= TOL_RAZON, 'critica': True,
-        'nota': 'Tarifa general del art. 468 ET. Si no da 19%, hay facturas con '
-                'tarifa distinta o mal leídas.',
+        'ok': abs(razon_iva - P.TARIFA_IVA) <= TOL_RAZON, 'critica': not derivado,
+        'nota': ('DERIVADA, no verificada: el reporte de la DIAN solo trae IVA y total, '
+                 'así que la base gravable se dedujo dividiendo entre el %g%%. Si alguna '
+                 'factura llevara tarifa distinta, quedaría mal repartida entre gravado '
+                 'y no gravado sin que esta razón lo delate.' % (P.TARIFA_IVA * 100))
+                if derivado else
+                ('Tarifa general del art. 468 ET. Si no da 19%, hay facturas con '
+                 'tarifa distinta o mal leídas.'),
     })
     razon_rete = rete / iva if iva else 0.0
+    derivado = fuente.get('origen') == 'crudo'
     v.append({
         'nombre': 'ReteIVA ÷ IVA generado',
         'valor': razon_rete, 'esperado': P.TARIFA_RETEIVA, 'formato': '%',
-        'ok': abs(razon_rete - P.TARIFA_RETEIVA) <= TOL_RAZON, 'critica': True,
-        'nota': 'Art. 437-1 ET. Una razón menor indica clientes que no le '
-                'practicaron la retención debiendo hacerlo.',
+        'ok': abs(razon_rete - P.TARIFA_RETEIVA) <= TOL_RAZON, 'critica': not derivado,
+        'nota': ('DERIVADA, no verificada: el reporte de la DIAN no trae la ReteIVA, '
+                 'así que el motor la calculó como el %g%% del IVA (Art. 437-1 ET). '
+                 'Esta razón no puede fallar y por eso no vale como comprobación: '
+                 'confróntela contra los certificados de los agentes retenedores.'
+                 % (P.TARIFA_RETEIVA * 100)) if derivado else
+                ('Art. 437-1 ET. Una razón menor indica clientes que no le '
+                 'practicaron la retención debiendo hacerlo.'),
     })
     dif = liq['reteiva_certificados'] - rete
-    v.append({
+    if not derivado or liq['reteiva_certificados']:
+      v.append({
         'nombre': 'ReteIVA: certificados vs. facturación electrónica',
         'valor': dif, 'esperado': 0.0, 'formato': '$',
         'ok': abs(dif) <= TOL_PESOS, 'critica': False,
         'nota': 'La DIAN cruza contra el certificado del agente retenedor, no '
                 'contra la contabilidad.',
-    })
+      })
     suma_facturas = sum(f['gravado'] + f['no_gravado'] for f in liq['facturas'])
     dif_base = suma_facturas - (liq['ingresos_gravados'] + liq['ingresos_no_gravados'])
     v.append({

@@ -152,16 +152,19 @@ que el IVA sea el 19&nbsp;% de los ingresos gravados y la ReteIVA el 15&nbsp;% d
     <label>CIIU<input name="ciiu" placeholder="código CIIU del RUT"></label>
     <label>Responsable de IVA<select name="responsable_iva">
       <option value="1" selected>Sí</option><option value="0">No</option></select></label>
+    <label class="ancho">Aporte a pensión pagado en el bimestre (total, 16&nbsp;% del IBC)
+      <input name="aporte_pension_total" placeholder="de la planilla PILA — 0 si no hubo"></label>
   </div>
   <div class="rst-archivo">
     <input type="file" name="archivo" accept=".xlsx" required>
     <button type="submit">Procesar el bimestre</button>
   </div>
-  <p class="rst-nota">El consolidado suele pesar decenas de MB por formato vacío, y aquí
-  solo entran <b>4 MB</b> por subida. Si no pasa, ábralo en Excel, borre las hojas que no
-  sean <code>F.VENTA</code>, <code>F.COMPRA</code>, <code>RETEIVA</code> y
-  <code>S.SOCIAL</code>, guárdelo de nuevo y vuelva a intentarlo; o procéselo desde el
-  equipo del contador.</p>
+  <p class="rst-nota">Suba el archivo <b>tal como lo descarga de la DIAN</b>, con las hojas
+  <code>Rp_Doc_…</code> (emitidos) y <code>Rp_Docpras</code> (recibidos): el motor deriva de
+  ahí el desglose de ingresos, las compras y la conciliación de ReteIVA. No hace falta
+  prepararlo antes. Si el archivo ya trae hojas <code>F.VENTA</code> o <code>F.COMPRA</code>
+  trabajadas a mano, se respetan. El <b>aporte a pensión</b> no está en la facturación
+  electrónica: sin él el anticipo sale más alto de lo debido.</p>
 </form></div>"""
 
 

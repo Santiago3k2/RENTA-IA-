@@ -91,6 +91,40 @@ def probar_caso_real():
     return liq, ficha
 
 
+def probar_modo_crudo():
+    """Lo importante: el archivo crudo de la DIAN basta.
+
+    Las hojas F.VENTA/F.COMPRA/RETEIVA son trabajo manual redundante; el motor
+    deriva el desglose de ingresos, las compras y la conciliación a partir de
+    Rp_Doc_… y Rp_Docpras, y tiene que dar exactamente lo mismo.
+    """
+    if CASO is None or not getattr(CASO, 'CRUDO', None):
+        return
+    if not os.path.exists(CASO.CRUDO):
+        fallos.append('No se encuentra el archivo crudo de referencia: %s' % CASO.CRUDO)
+        return
+    ficha = generar.cargar_ficha(CASO.FICHA)
+    ficha['aporte_pension_total'] = CASO.APORTE_PENSION
+    fuente = lector.leer(CASO.CRUDO)
+    if fuente['origen'] != 'crudo':
+        fallos.append('el lector no reconoció el archivo como crudo')
+    liq = calculos.liquidar(ficha, fuente)
+    for clave, valor in CASO.ESPERADO.items():
+        if clave == 'reteiva_certificados':
+            continue            # el certificado no está en ningún archivo de la DIAN
+        check('crudo · ' + clave, liq[clave], valor,
+              0.02 if clave != 'base_uvt' else 0.01)
+    for v in liq['validaciones']:
+        if not v['ok']:
+            fallos.append('crudo · validación en rojo: %s' % v['nombre'])
+    # Una razón derivada no puede fallar: no debe contar como comprobación crítica.
+    derivadas = [v for v in liq['validaciones']
+                 if v['nombre'].startswith(('IVA generado', 'ReteIVA ÷'))]
+    if any(v.get('critica') for v in derivadas):
+        fallos.append('en modo crudo las razones derivadas no pueden marcarse críticas: '
+                      'no pueden fallar y darían un verde falso')
+
+
 def probar_libro(liq, ficha):
     wb = libro.construir(liq, ficha)
     if wb.sheetnames != libro.ORDEN:
@@ -120,6 +154,7 @@ def main():
     resultado = probar_caso_real()
     if resultado:
         probar_libro(*resultado)
+    probar_modo_crudo()
     probar_semaforo_rojo()
 
     if fallos:

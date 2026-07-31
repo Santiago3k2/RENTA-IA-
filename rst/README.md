@@ -25,6 +25,34 @@ python -m rst.pruebas_web      # regresión del apartado publicado
 | `nube.py` | Supabase: `recibos_rst` y `alertas_rst`, tablas propias del módulo. |
 | `fichas\` | Un archivo por contribuyente con lo que el consolidado no trae. Copiar `ejemplo.py`; las fichas reales no se versionan. |
 
+## La entrada: el archivo crudo de la DIAN
+
+El motor trabaja con la exportación **tal como la descarga la DIAN**, que solo
+trae `Rp_Doc_<fecha>` (emitidos) y `Rp_Docpras` (recibidos). De ahí deriva todo
+lo demás, y da exacto:
+
+    gravado    = IVA ÷ 19 %          no gravado = Total − gravado − IVA
+    ReteIVA    = IVA × 15 %          base de compra = IVA ÷ 19 %
+
+Las hojas `F.VENTA`, `F.COMPRA` y `RETEIVA` son trabajo manual **redundante**:
+si vienen, se respetan (el criterio del contador manda), pero ya no hacen falta.
+Eso además resuelve el tope de subida: el archivo crudo del caso de referencia
+pesa **0,04 MB** contra los 63 MB del consolidado trabajado.
+
+Lo único que no sale de la facturación electrónica es el **aporte a pensión**
+(planilla PILA, otro sistema). Se captura en la ficha o en el formulario de la
+web; sin él el anticipo sale más alto de lo que el contribuyente debe pagar, y
+el motor lo alerta.
+
+### Cuidado con las razones derivadas
+
+En modo crudo, «IVA ÷ ingresos gravados = 19 %» y «ReteIVA ÷ IVA = 15 %» se
+cumplen **por construcción**: el motor las calculó así. Una comprobación que no
+puede fallar no es una comprobación, y presentarla como si lo fuera daría un
+verde falso. Por eso en ese modo quedan marcadas como DERIVADAS, dejan de ser
+críticas para el semáforo y el texto lo dice. Si el archivo trae las hojas
+trabajadas, vuelven a ser comprobaciones de verdad.
+
 ## El principio de autoverificación, aquí
 
 En renta la señal son los topes precalculados de la DIAN. En el SIMPLE son

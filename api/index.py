@@ -778,7 +778,17 @@ class handler(BaseHTTPRequestHandler):
             'incrngo': 0, 'ganancias_ocasionales': 0, 'devoluciones': 0,
             'ingresos_no_gravados_ica': 0, 'retenciones_previas': 0,
             'saldo_favor_iva_anterior': 0, 'inc': 0, 'sanciones': 0,
+            'aporte_pension_total': self._num_suelto(campo('aporte_pension_total')),
         }
+
+    @staticmethod
+    def _num_suelto(txt):
+        """Un número escrito por una persona: '920.200', '920200', '920,200'."""
+        t = (txt or '').replace('$', '').replace(' ', '').replace('.', '').replace(',', '.')
+        try:
+            return float(t) if t else 0.0
+        except ValueError:
+            raise ValueError('«%s» no es una cifra que se pueda leer.' % txt)
 
     def _post_subir_rst(self, ses):
         """Recibe el consolidado, liquida el bimestre en memoria y lo guarda."""
