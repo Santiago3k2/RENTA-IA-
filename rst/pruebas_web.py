@@ -210,17 +210,23 @@ def main():
         cli = Navegador(base)
         cli.post('/entrar', {'usuario': uc, 'clave': CLAVE})
         code, html, _ = cli.get('/rst')
-        revisar(code == 200 and 'Recibos 2593' in html, 'el cliente ve su apartado RST')
-        revisar('Todavía no hay recibos' in html,
-                'el cliente no ve los recibos de otros')
+        revisar(code == 403, 'el apartado RST está cerrado para quien no es admin',
+                f'dio {code}')
+        code, html, _ = cli.get('/')
+        revisar('/rst' not in html, 'al cliente no se le ofrece la pestaña del RST')
         if lista:
             code, _, _ = cli.get('/rst/' + lista[0]['ref'])
-            revisar(code == 404, 'el cliente no puede abrir un recibo ajeno',
-                    f'dio {code}')
-            code, html, _ = cli.get('/rst')
+            revisar(code == 403, 'el cliente no puede abrir un recibo ni con la '
+                                 'dirección a mano', f'dio {code}')
+            # 400 y no 403: el testigo anti-CSRF se comprueba antes que el rol,
+            # así que el envío se cae aún antes de mirar permisos. Lo que importa
+            # es que no pase.
             code, _, _ = cli.post(f'/rst/{lista[0]["ref"]}/estado',
-                                  {'estado': 'liberada', '_t': testigo(html)})
-            revisar(code == 403, 'el cliente no puede liberar un recibo', f'dio {code}')
+                                  {'estado': 'liberada', '_t': 'x'})
+            revisar(code in (400, 403), 'el cliente no puede liberar un recibo',
+                    f'dio {code}')
+        code, _, _ = cli.subir('/rst/subir', {'_t': 'x'}, 'x.xlsx', b'x')
+        revisar(code == 403, 'el cliente no puede subir un consolidado', f'dio {code}')
     finally:
         servidor.shutdown()
         for i in ids:

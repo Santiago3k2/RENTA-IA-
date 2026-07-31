@@ -201,13 +201,14 @@ def nav(activo, rol):
     que atiende la aplicación y cambiar entre ellos es la navegación principal.
     El resto de pestañas es del administrador.
     """
-    enlaces = [('/', 'Renta', 'bandeja'),
-               ('/rst', 'RST', 'rst')]
+    # El apartado RST es, por ahora, solo del administrador: está recién
+    # publicado y los clientes no deben verlo hasta que se decida cómo se les
+    # habilita. Para quien no es admin no hay a dónde ir, así que no hay barra.
     if rol != 'admin':
-        return ''.join(
-            f'<a href="{u}" class="{"act" if k == activo else ""}">{e(t)}</a>'
-            for u, t, k in enlaces)
-    enlaces += [('/admin', 'Panel', 'panel'),
+        return ''
+    enlaces = [('/', 'Renta', 'bandeja'),
+               ('/rst', 'RST', 'rst'),
+               ('/admin', 'Panel', 'panel'),
                ('/admin/cuentas', 'Cuentas', 'cuentas'),
                ('/admin/declaraciones', 'Declaraciones', 'declaraciones'),
                ('/admin/bitacora', 'Bitácora', 'bitacora'),

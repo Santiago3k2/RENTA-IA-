@@ -89,6 +89,12 @@ def env(nombre, defecto=''):
 ADMIN = 'admin'
 PILOTO = 'pruebapiloto2026'
 LIMITE_SUBIDA = 4 * 1024 * 1024      # lo que admite una función de Vercel
+
+# El apartado RST queda restringido al administrador mientras se decide cómo se
+# habilita a las demás cuentas. Se comprueba en el servidor, no solo ocultando
+# la pestaña: quien escriba la dirección a mano tampoco entra.
+NO_HAY_RST = ('El apartado del Régimen Simple todavía no está habilitado para su '
+              'cuenta. Escriba al contador si necesita acceso.')
 LIMITE_FORMULARIO = 16 * 1024        # ningún formulario de estos pesa más
 
 COOKIE = 'rentaia_sesion'
@@ -379,6 +385,9 @@ class handler(BaseHTTPRequestHandler):
                 return self._get_caso(ses, ruta.split('/')[2])
             if ruta.startswith('/libro/'):
                 return self._get_libro(ses, ruta.split('/')[2])
+            if ruta.startswith('/rst'):
+                if not ses['es_admin']:
+                    return self._error(NO_HAY_RST, 403)
             if ruta == '/rst':
                 return self._html(self._bandeja_rst(ses))
             if ruta.startswith('/rst/libro/'):
@@ -874,9 +883,11 @@ class handler(BaseHTTPRequestHandler):
                 return self._post_clave_forzada(ses, campos)
             if ruta == '/subir':
                 return self._post_subir(ses)
-            if ruta == '/rst/subir':
-                return self._post_subir_rst(ses)
-            if ruta.startswith('/rst/'):
+            if ruta.startswith('/rst'):
+                if not ses['es_admin']:
+                    return self._error(NO_HAY_RST, 403)
+                if ruta == '/rst/subir':
+                    return self._post_subir_rst(ses)
                 return self._post_recibo_rst(ses, ruta.split('/'), campos)
             if ruta == '/cuenta/clave':
                 return self._post_mi_clave(ses, campos)
