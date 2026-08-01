@@ -29,8 +29,8 @@ python -m rst.pruebas_web      # regresión del apartado publicado
 ## La entrada: el archivo crudo de la DIAN
 
 El motor trabaja con la exportación **tal como la descarga la DIAN**, que solo
-trae `Rp_Doc_<fecha>` (emitidos) y `Rp_Docpras` (recibidos). De ahí deriva todo
-lo demás, y da exacto:
+trae `Rp_Doc_<fecha>` y, a veces, `Rp_Docpras`. De ahí deriva todo lo demás, y
+da exacto:
 
     gravado    = IVA ÷ 19 %          no gravado = Total − gravado − IVA
     ReteIVA    = IVA × 15 %          base de compra = IVA ÷ 19 %
@@ -39,6 +39,39 @@ Las hojas `F.VENTA`, `F.COMPRA` y `RETEIVA` son trabajo manual **redundante**:
 si vienen, se respetan (el criterio del contador manda), pero ya no hacen falta.
 Eso además resuelve el tope de subida: el archivo crudo del caso de referencia
 pesa **0,04 MB** contra los 63 MB del consolidado trabajado.
+
+### Venta o compra lo decide el NIT, no la hoja
+
+La exportación de la DIAN **mezcla los documentos emitidos y los recibidos en la
+misma hoja** `Rp_Doc_…` y los separa en la columna «Grupo». Lo que distingue una
+factura de venta de una de compra no es la hoja en que viene: es si el
+contribuyente figura como **emisor** o como **receptor**.
+
+Tomar la hoja entera como ventas —que es lo que se hacía— tenía el error
+corriendo en los dos sentidos, y los dos en contra del contribuyente: las
+facturas que él **recibió** engordaban el ingreso, y encima su IVA no llegaba al
+descontable. En un caso real de 77 documentos, 13 facturas de compra se estaban
+declarando como ingreso:
+
+| | Con el bug | Corregido |
+|---|---:|---:|
+| Base del anticipo | 76.890.183 | **73.414.349** |
+| IVA descontable | 0 | **139.419** |
+| Anticipo neto | 2.401.473 | **2.191.185** |
+| IVA a pagar | 10.373.148 | **10.115.223** |
+
+Medio millón de pesos de más en un solo bimestre, en un cliente pequeño.
+
+El reparto lo hace `lector._lado` comparando el NIT del contribuyente contra
+`NIT Emisor` y `NIT Receptor`, con la columna «Grupo» como respaldo cuando no se
+sabe el NIT. El NIT sale de la ficha; si no aparece en **ninguna** fila del
+archivo, se avisa: casi siempre significa que se subió el consolidado de otro
+cliente.
+
+La excepción que confirma la regla es el **documento soporte con no obligados a
+facturar** (prefijo DSE): lo emite el comprador, así que el contribuyente
+aparece como emisor aunque esté comprando. Es compra, y el proveedor es el
+tercero que figura como receptor.
 
 ### El bimestre no se escoge: sale del archivo
 
@@ -66,10 +99,9 @@ tilde, contra un texto al que se le quitaron las tildes— no encontraba nada y
 las notas crédito **sumaban** al ingreso en vez de restarlo, el doble de su
 valor. Lo mismo del lado de las compras, inflando el IVA descontable.
 
-En el reporte de **emitidos** el documento soporte con no obligados y sus notas
-de ajuste no son ingreso —son compras a personas naturales—; en el de
-**recibidos** el documento soporte sí es una compra legítima. De ahí que
-`clasificar` reciba el lado.
+`clasificar` recibe el lado ya resuelto y devuelve a dónde va el documento
+—`'venta'`, `'compra'` o nada— junto con el signo. La nómina electrónica y los
+«application response» (acuses de recibo) no son ninguna de las dos cosas.
 
 Lo único que no sale de la facturación electrónica es el **aporte a pensión**
 (planilla PILA, otro sistema). Se captura en la ficha o en el formulario de la

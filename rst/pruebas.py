@@ -245,27 +245,108 @@ def probar_clasificacion_documentos():
     sumaban al ingreso en vez de restarlo: el doble de su valor, de más.
     """
     casos = [
-        ('Nota de crédito electrónica', 'emitidos', True, -1),
-        ('Nota Crédito electrónica', 'emitidos', True, -1),
-        ('NOTA CREDITO', 'emitidos', True, -1),
-        ('Nota de débito electrónica', 'emitidos', True, 1),
-        ('Factura electrónica', 'emitidos', True, 1),
+        ('Nota de crédito electrónica', 'emitidos', 'venta', -1),
+        ('Nota Crédito electrónica', 'emitidos', 'venta', -1),
+        ('NOTA CREDITO', 'emitidos', 'venta', -1),
+        ('Nota de débito electrónica', 'emitidos', 'venta', 1),
+        ('Factura electrónica', 'emitidos', 'venta', 1),
         # Documento soporte y sus notas de ajuste son COMPRAS a no obligados,
-        # aunque viajen en el reporte de emitidos.
-        ('Documento soporte con no obligados', 'emitidos', False, 1),
-        ('Nota de ajuste del documento soporte', 'emitidos', False, 1),
-        ('Application response', 'emitidos', False, 1),
-        ('Nómina electrónica', 'emitidos', False, 1),
-        # Del lado de recibidos el documento soporte sí es una compra legítima.
-        ('Documento soporte con no obligados', 'recibidos', True, 1),
-        ('Nota de crédito electrónica', 'recibidos', True, -1),
-        ('Application response', 'recibidos', False, 1),
+        # aunque el contribuyente sea quien los emite.
+        ('Documento soporte con no obligados', 'emitidos', 'compra', 1),
+        ('Nota de ajuste del documento soporte', 'emitidos', 'compra', 1),
+        ('Application response', 'emitidos', None, 1),
+        ('Nómina electrónica', 'emitidos', None, 1),
+        # Lo recibido es compra, y ahí el documento soporte también lo es.
+        ('Factura electrónica', 'recibidos', 'compra', 1),
+        ('Documento soporte con no obligados', 'recibidos', 'compra', 1),
+        ('Nota de crédito electrónica', 'recibidos', 'compra', -1),
+        ('Application response', 'recibidos', None, 1),
     ]
-    for tipo, lado, entra_esp, signo_esp in casos:
-        entra, signo = lector.clasificar(tipo, lado)
-        if entra != entra_esp or (entra and signo != signo_esp):
-            fallos.append('clasificar(%r, %r) dio (%s, %s), se esperaba (%s, %s)'
-                          % (tipo, lado, entra, signo, entra_esp, signo_esp))
+    for tipo, lado, destino_esp, signo_esp in casos:
+        destino, signo = lector.clasificar(tipo, lado)
+        if destino != destino_esp or (destino and signo != signo_esp):
+            fallos.append('clasificar(%r, %r) dio (%r, %s), se esperaba (%r, %s)'
+                          % (tipo, lado, destino, signo, destino_esp, signo_esp))
+
+
+def _archivo_dian(filas, hoja='Rp_Doc_20260801_1708'):
+    """Un consolidado crudo de la DIAN en memoria, con su maquetación real."""
+    import io
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = hoja
+    ws.append(['Tipo de documento', 'CUFE/CUDE', 'Folio', 'Prefijo', 'Divisa',
+               'Forma de Pago', 'Medio de Pago', 'Fecha Emisión', 'Fecha Recepción',
+               'NIT Emisor', 'Nombre Emisor', 'NIT Receptor', 'Nombre Receptor',
+               'IVA', 'ICA', 'IC', 'INC', 'Timbre', 'INC Bolsas', 'IN Carbono',
+               'IN Combustibles', 'IC Datos', 'ICL', 'INPP', 'IBUA', 'ICUI',
+               'Rete IVA', 'Rete Renta', 'Rete ICA', 'Total', 'Estado', 'Grupo'])
+    for tipo, ne, nome, nr, nomr, iva, total, grupo in filas:
+        f = [tipo, 'CUFE', '1', 'L', 'COP', '1', '47', '15-06-2026', '15-06-2026',
+             ne, nome, nr, nomr, iva] + [0] * 15 + [total, 'Aprobado', grupo]
+        ws.append(f)
+    datos = io.BytesIO()
+    wb.save(datos)
+    datos.seek(0)
+    return datos
+
+
+def probar_reparto_ventas_compras():
+    """Ventas y compras se separan por el NIT, no por la hoja.
+
+    La exportación de la DIAN mete emitidos y recibidos en la MISMA hoja
+    `Rp_Doc_…`. Tomando la hoja entera como ventas, las facturas que el
+    contribuyente RECIBIÓ se sumaban al ingreso —inflando la base del
+    anticipo— y de paso su IVA no llegaba al descontable. El error corría en
+    los dos sentidos y siempre en contra del contribuyente.
+    """
+    YO, NOMBRE = '900711617', 'LUMASEG CONSULTORES EN SEGUROS LTDA'
+    filas = [
+        # tipo, NIT emisor, nombre emisor, NIT receptor, nombre receptor, IVA, total, grupo
+        ('Factura electrónica', YO, NOMBRE, '890903790', 'SURAMERICANA',
+         19000, 119000, 'Emitido'),
+        ('Documento soporte con no obligados', YO, NOMBRE, '91280239', 'JAIME MARTINEZ',
+         0, 500000, 'Emitido'),
+        ('Nomina Individual', YO, NOMBRE, '1098780744', 'LINEY MEDINA',
+         0, 2000000, 'Emitido'),
+        ('Factura electrónica', '830122566', 'COLOMBIA TELECOMUNICACIONES', YO, NOMBRE,
+         1900, 11900, 'Recibido'),
+        ('Nota de crédito electrónica', '830122566', 'COLOMBIA TELECOMUNICACIONES',
+         YO, NOMBRE, 190, 1190, 'Recibido'),
+    ]
+    f = lector.leer(_archivo_dian(filas), YO)
+
+    check('reparto · ventas', len(f['ventas']), 1, 0)
+    check('reparto · compras', len(f['compras']), 3, 0)
+    # La factura recibida NO puede engordar el ingreso: 100.000, no 110.000.
+    check('reparto · ingreso gravado', sum(v['gravado'] for v in f['ventas']), 100000, 0.02)
+    # …y su IVA sí tiene que llegar al descontable, con la nota crédito restando.
+    check('reparto · IVA descontable', sum(c['iva'] for c in f['compras']), 1710, 0.02)
+    check('reparto · base de compras', sum(c['base'] for c in f['compras']), 9000, 0.02)
+
+    if f['ventas'][0]['tercero'] != 'SURAMERICANA':
+        fallos.append('en una venta el tercero es el RECEPTOR, dio %r'
+                      % f['ventas'][0]['tercero'])
+    proveedores = {c['proveedor'] for c in f['compras']}
+    if 'COLOMBIA TELECOMUNICACIONES' not in proveedores:
+        fallos.append('en una compra recibida el proveedor es el EMISOR, dio %r' % proveedores)
+    # El documento soporte lo emite el comprador: es compra, y el proveedor es
+    # el no obligado que figura como receptor del documento.
+    if 'JAIME MARTINEZ' not in proveedores:
+        fallos.append('el documento soporte con no obligados es una COMPRA a la persona '
+                      'natural, dio %r' % proveedores)
+
+    # Sin NIT el reparto se sostiene con la columna «Grupo» de la DIAN.
+    g = lector.leer(_archivo_dian(filas))
+    check('reparto sin NIT · ventas', len(g['ventas']), 1, 0)
+    check('reparto sin NIT · compras', len(g['compras']), 3, 0)
+
+    # Un consolidado de otro contribuyente tiene que avisarse, no procesarse en
+    # silencio como si fuera del cliente que se está declarando.
+    otro = lector.leer(_archivo_dian(filas), '901555552')
+    if not any('no aparece en ninguna fila' in a for a in otro['avisos']):
+        fallos.append('subir el consolidado de otro NIT debe avisarse: %r' % otro['avisos'])
 
 
 def probar_deteccion_periodo():
@@ -304,6 +385,7 @@ def probar_deteccion_periodo():
 def main():
     probar_parametros()
     probar_clasificacion_documentos()
+    probar_reparto_ventas_compras()
     probar_deteccion_periodo()
     resultado = probar_caso_real()
     if resultado:

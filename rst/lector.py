@@ -27,7 +27,10 @@ class ErrorLectura(Exception):
 # ------------------------------------------------------- tipos de documento
 
 def clasificar(tipo, lado='emitidos'):
-    """«Tipo de documento» de la DIAN → (entra al agregado, signo).
+    """«Tipo de documento» + lado → (destino, signo).
+
+    El destino es ``'venta'`` (ingreso del período), ``'compra'`` (IVA
+    descontable) o ``None`` (el documento no es ni lo uno ni lo otro).
 
     El signo es −1 para las notas crédito, que RESTAN del período, y +1 para
     todo lo demás, notas débito incluidas.
@@ -37,26 +40,108 @@ def clasificar(tipo, lado='emitidos'):
     crédito electrónica», así que buscar el literal «nota crédito» no encuentra
     nada y las notas crédito terminan SUMANDO al ingreso en vez de restarlo.
 
-    En el reporte de EMITIDOS viajan documentos que no son ingreso: el
-    documento soporte con no obligados a facturar (prefijo DSE) y sus notas de
-    ajuste son COMPRAS a personas naturales, la nómina electrónica es un gasto
-    y los «application response» son acuses de recibo. En el de RECIBIDOS el
-    documento soporte sí es una compra legítima.
+    El `lado` no sale de la hoja sino de quién es el contribuyente en la fila
+    (ver `_lado`). Con el lado ya resuelto casi todo es directo: lo que él
+    emite es venta y lo que recibe es compra. Las excepciones:
+
+    * El **documento soporte con no obligados a facturar** (prefijo DSE) lo
+      emite el comprador, no el vendedor: aunque el contribuyente figure como
+      emisor, es una COMPRA a una persona natural. Igual sus notas de ajuste.
+    * La **nómina electrónica** es un gasto de personal, no una compra con IVA,
+      y los **«application response»** son acuses de recibo: ninguno entra.
     """
     tn = _norm(tipo)
     if not tn:
-        return False, 1
+        return None, 1
     if 'application response' in tn or 'nomina' in tn:
-        return False, 1
-    if lado == 'emitidos' and 'documento soporte' in tn:
-        return False, 1
-    if 'nota' in tn and 'credito' in tn:
-        return True, -1
-    return True, 1
+        return None, 1
+    signo = -1 if ('nota' in tn and 'credito' in tn) else 1
+    if 'documento soporte' in tn:
+        return 'compra', signo
+    return ('venta' if lado == 'emitidos' else 'compra'), signo
 
 
 def _contar(conteo, clave):
     conteo[clave] = conteo.get(clave, 0) + 1
+
+
+# ------------------------------------------------- de qué lado está cada fila
+
+def _nit(v):
+    """NIT comparable: solo dígitos. Descarta puntos, guiones y el DV."""
+    return re.sub(r'\D', '', str(v or ''))
+
+
+def _dueno(filas, idx, nit_ficha, avisos):
+    """El NIT del contribuyente, que es lo que parte el archivo en dos.
+
+    Se prefiere el de la ficha. Si no viene —o no aparece en el archivo— se
+    infiere el NIT que más se repite entre emisores y receptores, que en un
+    consolidado propio es el del titular y solo él: es su archivo, está en
+    todas las filas.
+
+    Que el NIT de la ficha no aparezca NUNCA es motivo de aviso, no de
+    inferencia silenciosa: casi siempre significa que se subió el consolidado
+    de otro cliente.
+    """
+    ie, ir = idx.get('nit emisor'), idx.get('nit receptor')
+    if ie is None and ir is None:
+        return ''
+    pedido = _nit(nit_ficha)
+    veces = {}
+    for f in filas:
+        for i in (ie, ir):
+            if i is None:
+                continue
+            n = _nit(f[i]) if i < len(f) else ''
+            if n:
+                veces[n] = veces.get(n, 0) + 1
+    if pedido and pedido in veces:
+        return pedido
+    if not veces:
+        return ''
+    frecuente = max(veces, key=lambda n: veces[n])
+    if pedido:
+        avisos.append('El NIT %s no aparece en ninguna fila del archivo. El titular de '
+                      'los documentos es el NIT %s (%d de %d filas). Verifique que el '
+                      'consolidado sea el de este contribuyente.'
+                      % (pedido, frecuente, veces[frecuente], len(filas)))
+    return frecuente
+
+
+def _lado(fila, idx, yo, defecto):
+    """¿El contribuyente emitió esta fila o la recibió? None si no es suya.
+
+    Se decide por el NIT y no por la hoja, que es de donde venía el error: la
+    exportación de la DIAN mete emitidos y recibidos en la MISMA hoja
+    `Rp_Doc_…` y los separa en la columna «Grupo». Tomando la hoja entera como
+    ventas, las facturas que el contribuyente RECIBIÓ —sus compras— se sumaban
+    al ingreso, y encima su IVA no llegaba al descontable: el error corría en
+    los dos sentidos y siempre en contra del contribuyente.
+    """
+    if yo:
+        for clave, lado in (('nit emisor', 'emitidos'), ('nit receptor', 'recibidos')):
+            i = idx.get(clave)
+            if i is not None and i < len(fila) and _nit(fila[i]) == yo:
+                return lado
+    i = idx.get('grupo')
+    if i is not None and i < len(fila):
+        g = _norm(fila[i])
+        if g.startswith('emitido'):
+            return 'emitidos'
+        if g.startswith('recibido'):
+            return 'recibidos'
+    return None if yo else defecto
+
+
+def _contraparte(fila, idx, lado):
+    """(NIT, nombre) del tercero de la fila: el que no es el contribuyente."""
+    if lado == 'emitidos':
+        a, b = idx.get('nit receptor', 11), idx.get('nombre receptor', 12)
+    else:
+        a, b = idx.get('nit emisor', 9), idx.get('nombre emisor', 10)
+    dato = lambda i: str(fila[i] or '').strip() if i < len(fila) else ''
+    return dato(a), dato(b)
 
 
 # ---------------------------------------------------------------- utilidades
@@ -183,8 +268,11 @@ def _leer_ventas(ws, avisos, conteo):
             cola.append(f)          # filas de totales al pie del reporte
             _contar(conteo, 'pie')
             continue
-        entra, signo = clasificar(tipo, 'emitidos')
-        if not entra:
+        # La hoja F.VENTA la armó el contador con las ventas ya separadas, así
+        # que aquí el lado no se discute: lo único que se filtra son los tipos
+        # que no son ingreso.
+        destino, signo = clasificar(tipo, 'emitidos')
+        if destino != 'venta':
             descartadas += 1
             _contar(conteo, 'excluidos')
             continue
@@ -255,8 +343,8 @@ def _leer_compras(ws, avisos):
         if not _norm(tipo):
             cola.append(f)
             continue
-        entra, signo = clasificar(tipo, 'recibidos')
-        if not entra:
+        destino, signo = clasificar(tipo, 'recibidos')
+        if destino != 'compra':
             continue
         iva = signo * _num(f[idx['iva']])
         base = signo * _num(f[i_base]) if i_base is not None else 0.0
@@ -350,8 +438,14 @@ def _leer_seg_social(ws, avisos):
 
 # ------------------------------------------- modo crudo: solo Rp_Doc / Rp_Docpras
 
-def _derivar_ventas(ws, avisos, conteo, tarifa_iva, tarifa_reteiva):
-    """Ventas a partir del reporte crudo de documentos emitidos de la DIAN.
+def _derivar(ws, avisos, conteo, nit_ficha, tarifa_iva, tarifa_reteiva,
+             defecto='emitidos'):
+    """Reparte un reporte crudo de la DIAN en (ventas, compras).
+
+    Una sola pasada para las dos cosas porque **una misma hoja trae las dos**:
+    la exportación `Rp_Doc_…` mezcla lo emitido y lo recibido, y lo que separa
+    una factura de venta de una de compra no es la hoja en que viene sino si el
+    contribuyente es el emisor o el receptor.
 
     El reporte solo trae IVA y Total; el desglose se deduce, y da exacto:
 
@@ -366,8 +460,11 @@ def _derivar_ventas(ws, avisos, conteo, tarifa_iva, tarifa_reteiva):
     idx = _indices(enc)
     for c in ('iva', 'total'):
         if c not in idx:
-            raise ErrorLectura('El reporte de documentos emitidos no trae la columna %s.'
-                               % c.upper())
+            raise ErrorLectura('El reporte de documentos de la DIAN no trae la columna '
+                               '%s.' % c.upper())
+
+    filas = _filas(ws)
+    yo = _dueno(filas, idx, nit_ficha, avisos)
 
     # El IVA viene ya redondeado al peso en la factura, así que dividirlo entre
     # la tarifa devuelve la base con un error de hasta medio peso ÷ tarifa. Por
@@ -377,79 +474,75 @@ def _derivar_ventas(ws, avisos, conteo, tarifa_iva, tarifa_reteiva):
     # gravada salía con un «no gravado» negativo de un par de pesos.
     ruido = 0.5 / tarifa_iva + 1.0
 
-    ventas, descartadas = [], 0
-    for f in _filas(ws):
+    ventas, compras = [], []
+    descartadas = ajenas = 0
+    for f in filas:
         tipo = str(f[idx.get('tipo de documento', 0)] or '')
         conteo['filas'] = conteo.get('filas', 0) + 1
         if not _norm(tipo):
-            _contar(conteo, 'pie')
+            _contar(conteo, 'pie')          # filas de totales al pie del reporte
             continue
-        entra, signo = clasificar(tipo, 'emitidos')
-        if not entra:
+        lado = _lado(f, idx, yo, defecto)
+        if lado is None:
+            ajenas += 1
+            _contar(conteo, 'ajenos')
+            continue
+        destino, signo = clasificar(tipo, lado)
+        if destino is None:
             descartadas += 1
             _contar(conteo, 'excluidos')
             continue
-        _contar(conteo, 'notas_credito' if signo < 0 else 'ingresos')
+
         iva = _num(f[idx['iva']])
         total = _num(f[idx['total']])
-        gravado = iva / tarifa_iva if iva else 0.0
-        no_gravado = total - gravado - iva
-        if abs(no_gravado) < ruido:
-            gravado, no_gravado = total - iva, 0.0
-        ventas.append({
-            'tipo': tipo,
-            'nota_credito': signo < 0,
-            'fecha': _fecha(f[idx['fecha emision']] if 'fecha emision' in idx else None),
-            'prefijo': str(f[idx.get('prefijo', 3)] or '').strip(),
-            'folio': str(f[idx.get('folio', 2)] or '').strip(),
-            'nit': str(f[idx.get('nit receptor', 11)] or '').strip(),
-            'tercero': str(f[idx.get('nombre receptor', 12)] or '').strip(),
-            'gravado': signo * gravado,
-            'no_gravado': signo * no_gravado,
-            'iva': signo * iva,
-            'reteiva': signo * iva * tarifa_reteiva,
-            'total': signo * total,
-            'estado': str(f[idx.get('estado', -2)] or '').strip(),
-        })
+        fecha = _fecha(f[idx['fecha emision']] if 'fecha emision' in idx else None)
+        nit_t, nombre_t = _contraparte(f, idx, lado)
+        prefijo = str(f[idx.get('prefijo', 3)] or '').strip()
+        folio = str(f[idx.get('folio', 2)] or '').strip()
+
+        if destino == 'venta':
+            gravado = iva / tarifa_iva if iva else 0.0
+            no_gravado = total - gravado - iva
+            if abs(no_gravado) < ruido:
+                gravado, no_gravado = total - iva, 0.0
+            _contar(conteo, 'notas_credito' if signo < 0 else 'ingresos')
+            ventas.append({
+                'tipo': tipo,
+                'nota_credito': signo < 0,
+                'fecha': fecha,
+                'prefijo': prefijo,
+                'folio': folio,
+                'nit': nit_t,
+                'tercero': nombre_t,
+                'gravado': signo * gravado,
+                'no_gravado': signo * no_gravado,
+                'iva': signo * iva,
+                'reteiva': signo * iva * tarifa_reteiva,
+                'total': signo * total,
+                'estado': str(f[idx.get('estado', -2)] or '').strip(),
+            })
+        else:
+            _contar(conteo, 'compras')
+            compras.append({
+                'fecha': fecha,
+                'nit': nit_t,
+                'proveedor': nombre_t,
+                'prefijo': prefijo,
+                'folio': folio,
+                'base': signo * (iva / tarifa_iva if iva else 0.0),
+                'iva': signo * iva,
+                'total': signo * total,
+            })
+
     if descartadas:
-        avisos.append('Del reporte de emitidos se excluyeron %d documentos que no son '
-                      'ingreso: documentos soporte con no obligados (son compras a '
-                      'personas naturales), nómina y acuses.' % descartadas)
-    return ventas
-
-
-def _derivar_compras(ws, avisos, tarifa_iva):
-    """Compras a partir del reporte crudo de documentos recibidos."""
-    enc = next(ws.iter_rows(max_row=1, values_only=True))
-    idx = _indices(enc)
-    if 'iva' not in idx or 'total' not in idx:
-        raise ErrorLectura('El reporte de documentos recibidos no trae IVA y Total.')
-
-    compras, acuses = [], 0
-    for f in _filas(ws):
-        tipo = str(f[idx.get('tipo de documento', 0)] or '')
-        if not _norm(tipo):
-            continue
-        entra, signo = clasificar(tipo, 'recibidos')
-        if not entra:
-            acuses += 1          # acuses de recibo y nómina: no son compras
-            continue
-        iva = _num(f[idx['iva']])
-        compras.append({
-            'fecha': _fecha(f[idx['fecha emision']] if 'fecha emision' in idx else None),
-            'nit': str(f[idx.get('nit emisor', 9)] or '').strip(),
-            'proveedor': str(f[idx.get('nombre emisor', 10)] or '').strip(),
-            'prefijo': str(f[idx.get('prefijo', 3)] or '').strip(),
-            'folio': str(f[idx.get('folio', 2)] or '').strip(),
-            'base': signo * (iva / tarifa_iva if iva else 0.0),
-            'iva': signo * iva,
-            'total': signo * _num(f[idx['total']]),
-        })
-    if acuses:
-        avisos.append('Del reporte de recibidos se excluyeron %d documentos que no son '
-                      'compra: «Application response» (acuses de recibo) y nómina '
-                      'electrónica.' % acuses)
-    return compras
+        avisos.append('Se excluyeron %d documentos que no son ni ingreso ni compra con '
+                      'IVA: nómina electrónica y acuses de recibo («Application '
+                      'response»).' % descartadas)
+    if ajenas:
+        avisos.append('Se excluyeron %d documentos en los que el NIT %s no figura ni '
+                      'como emisor ni como receptor: no son de este contribuyente.'
+                      % (ajenas, yo))
+    return ventas, compras
 
 
 def _derivar_reteiva(ventas, tarifa_reteiva):
@@ -476,16 +569,20 @@ def _derivar_reteiva(ventas, tarifa_reteiva):
     return agentes
 
 
-def periodos(ventas):
+def periodos(ventas, compras=()):
     """Períodos (año, bimestre) presentes en el archivo, del más cargado al menos.
 
     Es lo que evita tener que acertar el bimestre a mano: el archivo ya dice de
     qué período es. Un consolidado descargado para un bimestre trae un solo
     período; si trae varios, el primero de la lista es el que manda y los demás
     quedan a la vista para procesarlos aparte.
+
+    Manda la fecha de las VENTAS, que es lo que define el período gravable. Las
+    compras solo se miran si no hubo una sola venta, para no dejar sin período
+    un bimestre en el que únicamente se compró.
     """
     cajas = {}
-    for v in ventas:
+    for v in (ventas or compras):
         f = v['fecha']
         if not f:
             continue
@@ -499,7 +596,7 @@ def periodos(ventas):
 
 # ------------------------------------------------------------------- fachada
 
-def leer(ruta, tarifa_iva=0.19, tarifa_reteiva=0.15):
+def leer(ruta, nit='', tarifa_iva=0.19, tarifa_reteiva=0.15):
     """Archivo de la DIAN → ventas, compras, reteiva, seg_social y avisos.
 
     Acepta las dos formas del archivo:
@@ -511,6 +608,10 @@ def leer(ruta, tarifa_iva=0.19, tarifa_reteiva=0.15):
     * **trabajado** — un consolidado que ya trae `F.VENTA`, `F.COMPRA`, `RETEIVA`
       y `S.SOCIAL` hechas a mano. Si están, se respetan: el trabajo del contador
       manda sobre lo que el motor deduciría.
+
+    El `nit` es el del contribuyente: en el archivo crudo es lo que separa sus
+    ventas de sus compras. Puede omitirse —se infiere del propio archivo— pero
+    darlo permite además avisar si el consolidado es de otro cliente.
     """
     avisos = []
     conteo = {}
@@ -532,16 +633,25 @@ def leer(ruta, tarifa_iva=0.19, tarifa_reteiva=0.15):
                               'queda en cero.')
         elif emitidos is not None:
             origen = 'crudo'
-            ventas = _derivar_ventas(emitidos, avisos, conteo, tarifa_iva, tarifa_reteiva)
-            tot_ventas = {}
+            ventas, compras = _derivar(emitidos, avisos, conteo, nit,
+                                       tarifa_iva, tarifa_reteiva, 'emitidos')
             if recibidos is not None:
-                compras = _derivar_compras(recibidos, avisos, tarifa_iva)
+                # Hoja aparte de recibidos: ahí el contribuyente es el receptor
+                # de todo, pero se vuelve a decidir por NIT y no por la hoja.
+                _, mas = _derivar(recibidos, avisos, conteo, nit,
+                                  tarifa_iva, tarifa_reteiva, 'recibidos')
+                compras += mas
+            if not compras:
+                avisos.append('El archivo no trae un solo documento recibido: el IVA '
+                              'descontable queda en cero. Si el contribuyente sí tuvo '
+                              'compras, descargue el consolidado incluyendo los '
+                              'documentos recibidos.')
             else:
-                compras = []
-                avisos.append('El archivo no trae el reporte de documentos recibidos '
-                              '(Rp_Docpras): el IVA descontable queda en cero y hay que '
-                              'descargarlo aparte.')
-            tot_compras = {}
+                avisos.append('Del archivo se tomaron %d documentos como VENTAS (el '
+                              'contribuyente es el emisor) y %d como COMPRAS (es el '
+                              'receptor, o emitió el documento soporte de una compra a '
+                              'un no obligado).' % (len(ventas), len(compras)))
+            tot_ventas, tot_compras = {}, {}
         else:
             raise ErrorLectura(
                 'El archivo no tiene ni la hoja de documentos emitidos (Rp_Doc_…) ni '
@@ -588,7 +698,7 @@ def leer(ruta, tarifa_iva=0.19, tarifa_reteiva=0.15):
         'compras': compras,
         'reteiva': reteiva,
         'seg_social': seg,
-        'periodos': periodos(ventas),
+        'periodos': periodos(ventas, compras),
         'clasificacion': conteo,
         'totales_declarados': {'ventas': tot_ventas, 'compras': tot_compras},
         'conteo_reportes': {'emitidos': n_emitidos, 'recibidos': n_recibidos},

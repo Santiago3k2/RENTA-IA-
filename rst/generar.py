@@ -70,8 +70,13 @@ def resolver_periodo(ficha, fuente):
 
 
 def procesar(ruta_consolidado, ficha):
-    """Consolidado + ficha → (liquidación, workbook). Sin tocar disco."""
-    fuente = lector.leer(ruta_consolidado)
+    """Consolidado + ficha → (liquidación, workbook). Sin tocar disco.
+
+    El NIT va al lector porque es lo que separa las ventas de las compras: en
+    el archivo crudo de la DIAN ambas viven en la misma hoja y lo único que las
+    distingue es si el contribuyente es el emisor o el receptor.
+    """
+    fuente = lector.leer(ruta_consolidado, ficha.get('nit', ''))
     resolver_periodo(ficha, fuente)
     liq = calculos.liquidar(ficha, fuente)
     return liq, libro.construir(liq, ficha)
