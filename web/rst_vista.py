@@ -34,6 +34,10 @@ def _pct(v):
     return f'{float(v) * 100:,.2f}'.replace('.', ',') + ' %'
 
 
+def _entero(v):
+    return f'{int(v):,}'.replace(',', '.')
+
+
 # ─────────────────────────────────────────────────────────── bandeja
 
 def _fila_recibo(c, mostrar_estado):
@@ -127,11 +131,18 @@ def formulario(token='', cupo=None):
                 f'<p>Su cupo está completo: ha procesado <b>{cupo[0]} de {cupo[1]}</b>. '
                 f'Puede seguir consultando lo que ya cargó; para ampliarlo, escriba '
                 f'al contador.</p></div>')
-    grupos = ''.join(
-        f'<option value="{n}"{" selected" if n == 3 else ""}>Grupo {n} — {e(t)}</option>'
-        for n, t in sorted(_GRUPOS.items()))
-    bimestres = ''.join(f'<option value="{n}">{n} — {e(t)}</option>'
-                        for n, t in sorted(_BIMESTRES.items()))
+    # El grupo NO viene preseleccionado a propósito: define la tarifa y puede
+    # duplicar el impuesto. Dejar uno por defecto hacía que se liquidara con él
+    # sin que nadie lo hubiera decidido.
+    grupos = ('<option value="" disabled selected>Elija el grupo…</option>' + ''.join(
+        f'<option value="{n}">Grupo {n} — {e(t)}</option>'
+        for n, t in sorted(_GRUPOS.items())))
+    # El bimestre sale de las fechas del archivo. Antes quedaba preseleccionado
+    # el 1 y un archivo de mayo-junio se liquidaba como enero-febrero: cero
+    # facturas dentro del período y un libro entero en ceros.
+    bimestres = ('<option value="" selected>Detectar del archivo</option>' + ''.join(
+        f'<option value="{n}">{n} — {e(t)}</option>'
+        for n, t in sorted(_BIMESTRES.items())))
     return f"""<div class="subir"><h2>Procesar un bimestre del SIMPLE</h2>
 <p>Suba el <b>consolidado de documentos electrónicos</b> de la DIAN y complete lo que
 ese archivo no trae. El motor liquida el anticipo, arma el libro de 9 hojas y valida
@@ -143,8 +154,8 @@ que el IVA sea el 19&nbsp;% de los ingresos gravados y la ReteIVA el 15&nbsp;% d
     <label>NIT<input name="nit" required placeholder="sin puntos ni guiones"></label>
     <label>DV<input name="dv" placeholder="del RUT"></label>
     <label>Año gravable<input name="ano" type="number" value="2026" required></label>
-    <label>Bimestre<select name="bimestre" required>{bimestres}</select></label>
-    <label class="ancho">Grupo de actividad SIMPLE<select name="grupo">{grupos}</select></label>
+    <label>Bimestre<select name="bimestre">{bimestres}</select></label>
+    <label class="ancho">Grupo de actividad SIMPLE<select name="grupo" required>{grupos}</select></label>
     <label>Municipio<input name="municipio" required placeholder="donde se ejerce la actividad"></label>
     <label>Código DANE<input name="cod_dane" placeholder="código DANE"></label>
     <label>Departamento<input name="depto" placeholder="departamento"></label>
@@ -159,7 +170,9 @@ que el IVA sea el 19&nbsp;% de los ingresos gravados y la ReteIVA el 15&nbsp;% d
     <input type="file" name="archivo" accept=".xlsx" required>
     <button type="submit">Procesar el bimestre</button>
   </div>
-  <p class="rst-nota">Suba el archivo <b>tal como lo descarga de la DIAN</b>, con las hojas
+  <p class="rst-nota">El <b>bimestre sale de las fechas del archivo</b>: no hace falta
+  acertarlo. Si el archivo trae más de un período, se liquida el que tenga más documentos
+  y el recibo avisa de los otros. Suba el archivo <b>tal como lo descarga de la DIAN</b>, con las hojas
   <code>Rp_Doc_…</code> (emitidos) y <code>Rp_Docpras</code> (recibidos): el motor deriva de
   ahí el desglose de ingresos, las compras y la conciliación de ReteIVA. No hace falta
   prepararlo antes. Si el archivo ya trae hojas <code>F.VENTA</code> o <code>F.COMPRA</code>
@@ -188,6 +201,8 @@ def vista_recibo(caso, usuario='', pie=render.PIE_LOCAL, mostrar_estado=False,
     for v in (f.get('validaciones') or []):
         if v.get('formato') == '%':
             valor, esperado = _pct(v['valor']), _pct(v['esperado'])
+        elif v.get('formato') == 'n':      # conteos: ni pesos ni porcentaje
+            valor, esperado = _entero(v['valor']), _entero(v['esperado'])
         else:
             valor, esperado = pesos(v['valor']), pesos(v['esperado'])
         estado = ('<span class="ok">CUADRA</span>' if v.get('ok')

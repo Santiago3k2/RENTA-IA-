@@ -96,16 +96,31 @@ def liquidar(ficha, fuente):
     uvt = P.uvt(ano)
     meses = P.meses_bimestre(bim)
 
+    # Un solo recorrido y sin `v not in del_periodo`: esa comparación era
+    # cuadrática sobre diccionarios y con 8.000 facturas —un hotel, un bimestre—
+    # se llevaba segundos ella sola, más que leer el archivo entero.
     ventas = fuente['ventas']
-    del_periodo = [v for v in ventas if v['fecha'] and v['fecha'].month in meses
-                   and v['fecha'].year == ano]
-    fuera = [v for v in ventas if v not in del_periodo]
+    del_periodo, fuera = [], []
+    for v in ventas:
+        f = v['fecha']
+        if f and f.month in meses and f.year == ano:
+            del_periodo.append(v)
+        else:
+            fuera.append(v)
 
     por_mes = _resumen_meses(del_periodo, meses)
     gravados = sum(f['gravado'] for f in por_mes)
     no_gravados = sum(f['no_gravado'] for f in por_mes)
     iva_generado = sum(f['iva'] for f in por_mes)
     reteiva_fe = sum(f['reteiva'] for f in por_mes)
+
+    # Las notas crédito del archivo YA vienen con signo negativo desde el
+    # lector, así que están restadas dentro de `gravados`/`no_gravados`: este
+    # dato es informativo para el libro y NO se vuelve a restar de la base.
+    # `devoluciones` de la ficha es otra cosa: las notas crédito que el archivo
+    # no trae y el contador captura a mano.
+    notas_credito = [v for v in del_periodo if v.get('nota_credito')]
+    devoluciones_detectadas = -sum(v['gravado'] + v['no_gravado'] for v in notas_credito)
 
     incrngo = float(ficha.get('incrngo', 0) or 0)
     ganancias = float(ficha.get('ganancias_ocasionales', 0) or 0)
@@ -179,6 +194,9 @@ def liquidar(ficha, fuente):
         'por_mes': por_mes,
         'facturas': del_periodo,
         'facturas_fuera_periodo': fuera,
+        'notas_credito': notas_credito,
+        'devoluciones_detectadas': devoluciones_detectadas,
+        'periodos_del_archivo': fuente.get('periodos', []),
         'compras_gravadas': gravadas,
         'compras_excluidas': excluidas,
         'agentes_reteiva': fuente['reteiva'],
@@ -232,6 +250,31 @@ def validar(liq, ficha, fuente):
     v = []
     g, iva, rete = liq['ingresos_gravados'], liq['iva_generado'], liq['reteiva']
 
+    # Lo primero, porque si esto falla lo demás no significa nada: que el
+    # archivo tenga documentos DEL bimestre que se está liquidando. Un archivo
+    # de mayo-junio procesado como bimestre 1 pasaba el filtro sin una sola
+    # factura y salía un libro entero en ceros con semáforo AMARILLO, como si
+    # fuera una declaración válida. Un período vacío teniendo el archivo
+    # documentos de otro período es un período mal escogido, no un bimestre sin
+    # ventas: va en ROJO.
+    dentro, afuera = len(liq['facturas']), len(liq['facturas_fuera_periodo'])
+    otros = [p for p in liq.get('periodos_del_archivo', [])
+             if (p['ano'], p['bimestre']) != (liq['ano'], liq['bimestre'])]
+    v.append({
+        'nombre': 'Documentos del archivo que caen en el bimestre declarado',
+        'valor': dentro, 'esperado': 1, 'formato': 'n',
+        'ok': dentro > 0 or afuera == 0, 'critica': True,
+        'nota': ('El archivo NO trae ningún documento de %s de %d. Lo que trae es: %s. '
+                 'Vuelva a procesarlo con el período que corresponde: así como está, la '
+                 'declaración sale en ceros.'
+                 % (liq['nombre_bimestre'].lower(), liq['ano'],
+                    P.describir_periodos(otros) or 'documentos de otros períodos')) if dentro == 0
+                else ('Se esperaba al menos un documento del período. %s'
+                      % ('Todo el archivo corresponde a este bimestre.' if afuera == 0 else
+                         'Otros %d documento(s) del archivo son de %s y quedaron fuera.'
+                         % (afuera, P.describir_periodos(otros) or 'otros períodos'))),
+    })
+
     razon_iva = iva / g if g else 0.0
     derivado = fuente.get('origen') == 'crudo'
     v.append({
@@ -269,6 +312,21 @@ def validar(liq, ficha, fuente):
         'nota': 'La DIAN cruza contra el certificado del agente retenedor, no '
                 'contra la contabilidad.',
       })
+    # Un documento sin fecha legible no cae en ningún bimestre: desaparece del
+    # ingreso sin dejar rastro. Es la única forma en que el modo crudo puede
+    # perder plata en silencio, y por eso es crítica.
+    sin_fecha = sum(1 for x in fuente.get('ventas', []) if not x['fecha'])
+    v.append({
+        'nombre': 'Documentos con fecha de emisión legible',
+        'valor': sin_fecha, 'esperado': 0, 'formato': 'n',
+        'ok': sin_fecha == 0, 'critica': True,
+        'nota': 'Un documento sin fecha no entra en ningún bimestre y se pierde del '
+                'ingreso sin avisar. Revise el formato de la columna «Fecha Emisión».'
+                if sin_fecha else
+                'Todos los documentos traen fecha, así que ninguno se pierde al '
+                'repartirlos por bimestre.',
+    })
+
     suma_facturas = sum(f['gravado'] + f['no_gravado'] for f in liq['facturas'])
     dif_base = suma_facturas - (liq['ingresos_gravados'] + liq['ingresos_no_gravados'])
     v.append({
@@ -322,6 +380,26 @@ def alertas(liq, ficha, fuente):
                         f'{rnd(liq["base"] * alterno):,.0f}'.replace(',', '.')),
         })
     proyeccion = liq['base_uvt'] * 6
+    # El tope de permanencia manda sobre todo lo demás: por encima de 100.000
+    # UVT anuales no hay tarifa que aplicar porque el contribuyente no puede
+    # estar en el SIMPLE. La tabla del art. 908 termina justo ahí (16.666 UVT
+    # bimestrales × 6), así que una base por encima significa que se está
+    # liquidando un régimen que no le corresponde.
+    tope_bimestral = P.TARIFAS[grupo][-1][1]
+    if proyeccion > P.TOPE_SIMPLE_UVT:
+        a.append({
+            'prioridad': 'ALTA', 'tema': 'Tope de permanencia en el SIMPLE',
+            'texto': 'La base del bimestre son %.0f UVT, que proyectadas a seis bimestres '
+                     'dan ~%.0f UVT anuales, POR ENCIMA del tope de %s UVT ($%s) del Art. '
+                     '905 ET. Si el año cierra así, el contribuyente queda excluido del '
+                     'SIMPLE y debe tributar en el régimen ordinario. La tabla del Art. '
+                     '908 termina en %s UVT bimestrales: por encima se aplicó la tarifa '
+                     'mayor del grupo (%.1f%%), pero eso NO subsana la exclusión.'
+                     % (liq['base_uvt'], proyeccion,
+                        f'{P.TOPE_SIMPLE_UVT:,}'.replace(',', '.'),
+                        f'{P.TOPE_SIMPLE_UVT * liq["uvt"]:,.0f}'.replace(',', '.'),
+                        f'{tope_bimestral:,}'.replace(',', '.'), liq['tarifa'] * 100),
+        })
     if proyeccion > P.TOPE_GRUPO3_UVT * 0.8:
         a.append({
             'prioridad': 'ALTA', 'tema': 'Cercanía al tope de %d UVT' % P.TOPE_GRUPO3_UVT,
@@ -408,11 +486,25 @@ def alertas(liq, ficha, fuente):
     for aviso in fuente.get('avisos', []):
         a.append({'prioridad': 'MEDIA', 'tema': 'Lectura del archivo fuente', 'texto': aviso})
     if liq['facturas_fuera_periodo']:
+        otros = [p for p in liq.get('periodos_del_archivo', [])
+                 if (p['ano'], p['bimestre']) != (liq['ano'], liq['bimestre'])]
         a.append({
-            'prioridad': 'ALTA', 'tema': 'Facturas fuera del bimestre',
-            'texto': 'El archivo trae %d facturas con fecha fuera de %s: quedaron excluidas '
-                     'de esta liquidación. Verifica que correspondan a otro período.'
-                     % (len(liq['facturas_fuera_periodo']), liq['nombre_bimestre'].lower()),
+            'prioridad': 'ALTA', 'tema': 'Documentos fuera del bimestre',
+            'texto': 'El archivo trae %d documentos con fecha fuera de %s de %d: quedaron '
+                     'excluidos de esta liquidación. Corresponden a %s, y hay que '
+                     'procesarlos por separado en su propio recibo.'
+                     % (len(liq['facturas_fuera_periodo']), liq['nombre_bimestre'].lower(),
+                        liq['ano'], P.describir_periodos(otros) or 'otros períodos'),
+        })
+    if liq['notas_credito']:
+        a.append({
+            'prioridad': 'MEDIA', 'tema': 'Notas crédito del período',
+            'texto': 'Se detectaron %d nota(s) crédito por $%s y YA están restadas del '
+                     'ingreso. Verifica que correspondan a devoluciones, rebajas o '
+                     'descuentos del bimestre y no a la anulación de una factura de otro '
+                     'período.'
+                     % (len(liq['notas_credito']),
+                        f'{liq["devoluciones_detectadas"]:,.0f}'.replace(',', '.')),
         })
     return a
 

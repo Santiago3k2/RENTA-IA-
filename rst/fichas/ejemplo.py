@@ -19,8 +19,13 @@ FICHA = {
     'ciiu': '',                     # p. ej. '6621 / 6629 — Agentes de seguros'
 
     # --- período que se liquida
+    # Déjalo en None y el motor lo deduce de las fechas del archivo, que es lo
+    # normal: un consolidado descargado para un bimestre ya dice cuál es. Solo
+    # ponle un número si quieres forzar uno, y entonces el motor aborta si el
+    # archivo no trae documentos de ese período (en vez de sacar un libro en
+    # ceros que parece una declaración válida).
     'ano': 2026,
-    'bimestre': 1,                  # 1 a 6
+    'bimestre': None,               # None = detectar del archivo; o 1 a 6
 
     # --- criterio tributario
     # El grupo es la decisión más delicada del caso: define la tarifa. No es un

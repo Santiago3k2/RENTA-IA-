@@ -155,10 +155,18 @@ def hoja_ingresos(wb, liq, ficha, A):
          'N/A', 'NO', 'NO', 'Se depuran de la base — Art. 910 ET', True),
         ('Ganancias ocasionales', liq['ganancias_ocasionales'],
          'N/A', 'NO', 'NO', 'No hacen parte del anticipo bimestral', True),
-        ('Devoluciones, rebajas y descuentos (notas crédito)', liq['devoluciones'],
+        # Ojo: las notas crédito del archivo ya vienen restadas dentro del
+        # gravado y el no gravado del detalle, así que esta casilla NO las
+        # repite —volvería a restarlas—. Es solo para las que el archivo no
+        # traiga y haya que capturar a mano.
+        ('Devoluciones, rebajas y descuentos que el archivo no trae', liq['devoluciones'],
          '—', 'Restan', 'Restan',
-         'Se detectaron y restaron del detalle' if liq['devoluciones']
-         else 'No se detectaron notas crédito en el bimestre', True),
+         ('El archivo trae %d nota(s) crédito por $%s, YA restadas en el detalle de '
+          'abajo. Aquí solo van las que el archivo no traiga.'
+          % (len(liq['notas_credito']), _pesos(liq['devoluciones_detectadas'])))
+         if liq['notas_credito']
+         else 'El archivo no trae notas crédito de este bimestre. Capture aquí las que '
+              'no estén en la facturación electrónica.', True),
         ('Ingresos por fuera del municipio', 0,
          '—', 'Sí', 'NO en %s' % (liq['filas_ica'][0]['nombre'] or 'el municipio'),
          'Se declaran en el municipio de origen', True),
@@ -634,7 +642,9 @@ def hoja_liquidacion(wb, liq, ficha, A):
     _seccion(ws, 4, 'SECCIÓN A — IDENTIFICACIÓN DEL DECLARANTE', 8)
     ident = [
         ('1', 'Año gravable', liq['ano']),
-        ('3', 'Período', '%d — %s' % (liq['bimestre'], liq['nombre_bimestre'])),
+        ('3', 'Período', '%d — %s%s' % (liq['bimestre'], liq['nombre_bimestre'],
+                                        '  (detectado de las fechas del archivo)'
+                                        if ficha.get('_periodo_auto') else '')),
         ('5', 'Número de Identificación Tributaria (NIT)', ficha['nit']),
         ('6', 'DV', ficha.get('dv') or '(verificar en RUT)'),
         ('7', 'Razón social', ficha['nombre']),
@@ -686,11 +696,22 @@ def hoja_liquidacion(wb, liq, ficha, A):
     linea(23, '—', 'Base expresada en UVT', "=F22/'8.PARAMETROS'!$C$4",
           'UVT %d = $%s' % (liq['ano'], _pesos(liq['uvt'])), fmt=UVT_FMT)
     ini_t, fin_t = A['tabla_tarifas']
+    # La base se acota al rango de la tabla ANTES de buscar el tramo. Sin eso,
+    # una base por encima del último tramo (16.666 UVT bimestrales, el tope
+    # anual de 100.000 UVT dividido en seis) no casaba con ninguna fila: el
+    # SUMIFS devolvía 0, la tarifa salía 0,00% y el anticipo $0 — mientras la
+    # liquidación de Python sí aplicaba la tarifa mayor. El libro es el papel de
+    # trabajo definitivo, así que esa diferencia entregaba un anticipo en cero.
+    # El extremo inferior se acota igual para que una base de 0 no deje también
+    # la tarifa en blanco.
+    base_ok = ("MIN(MAX(F23,0.000001),MAX('8.PARAMETROS'!$D${i}:$D${f}))"
+               .format(i=ini_t, f=fin_t))
     linea(24, '—', 'Tarifa SIMPLE consolidada aplicable',
           "=SUMIFS('8.PARAMETROS'!$E${i}:$E${f},'8.PARAMETROS'!$A${i}:$A${f},"
-          "'8.PARAMETROS'!$C$5,'8.PARAMETROS'!$C${i}:$C${f},\"<\"&F23,"
-          "'8.PARAMETROS'!$D${i}:$D${f},\">=\"&F23)".format(i=ini_t, f=fin_t),
-          'Grupo %d, tramo por la base en UVT' % liq['grupo'], CREMA, fmt=PORCENTAJE)
+          "'8.PARAMETROS'!$C$5,'8.PARAMETROS'!$C${i}:$C${f},\"<\"&{b},"
+          "'8.PARAMETROS'!$D${i}:$D${f},\">=\"&{b})".format(i=ini_t, f=fin_t, b=base_ok),
+          'Grupo %d, tramo por la base en UVT (acotada al rango de la tabla)'
+          % liq['grupo'], CREMA, fmt=PORCENTAJE)
     linea(25, 30, '(=) ANTICIPO SIMPLE CONSOLIDADO', '=ROUND(F22*F24,0)',
           'Incluye el componente de ICA', AZUL_CLARO)
 
@@ -701,8 +722,12 @@ def hoja_liquidacion(wb, liq, ficha, A):
           'Se gira al municipio — hoja 6')
     linea(29, '—', '(=) Componente nacional del anticipo', '=F25+F28',
           'Única parte sobre la que opera el descuento', AZUL_CLARO)
+    # MAX(0;F29) y no F29 a secas: si el componente nacional fuera negativo
+    # —ICA consolidado por encima del anticipo—, el MIN se quedaba con ese
+    # negativo y la resta lo convertía en un descuento POSITIVO, que sumaba.
+    # Es la misma guarda que hace la liquidación en Python.
     linea(30, 44, '(−) Descuento: aportes a pensión a cargo del empleador',
-          "=-MIN('7.SEG.SOCIAL'!$%s,F29)" % A['pension_total'].replace('G', 'G$'),
+          "=-MIN('7.SEG.SOCIAL'!$%s,MAX(0,F29))" % A['pension_total'].replace('G', 'G$'),
           '%g%% patronal pagado en el bimestre — hoja 7' % (P.PENSION_EMPLEADOR * 100))
     linea(31, 45, '(−) Retenciones y autorretenciones practicadas antes de ingresar al SIMPLE',
           liq['retenciones_previas'], 'Solo procede en el 1.er bimestre', CREMA)

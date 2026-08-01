@@ -40,6 +40,37 @@ si vienen, se respetan (el criterio del contador manda), pero ya no hacen falta.
 Eso además resuelve el tope de subida: el archivo crudo del caso de referencia
 pesa **0,04 MB** contra los 63 MB del consolidado trabajado.
 
+### El bimestre no se escoge: sale del archivo
+
+Las fechas de los documentos ya dicen de qué período es el archivo, así que el
+motor lo deduce solo y en el formulario el bimestre viene en «detectar del
+archivo». Si se fuerza uno a mano y el archivo no trae **ningún** documento de
+ese período, el proceso se aborta nombrando el correcto.
+
+Esto no es comodidad: antes un consolidado de mayo-junio procesado como
+bimestre 1 pasaba el filtro sin una sola factura y salía un libro **entero en
+ceros con semáforo AMARILLO**, indistinguible de una declaración válida. Ahora
+un período vacío teniendo el archivo documentos de otros va en **ROJO**. Un
+bimestre realmente sin ventas sí se puede declarar en ceros: el SIMPLE obliga a
+presentar el anticipo aunque no haya habido ingresos.
+
+Si el archivo trae más de un período se liquida el que tenga más documentos y
+el recibo avisa de los otros, que van en su propio recibo.
+
+### Las notas crédito restan
+
+El tipo de documento se clasifica por palabras sobre el nombre **ya
+normalizado** (`lector.clasificar`), no por la frase completa. La DIAN escribe
+«Nota de crédito electrónica»: comparar contra el literal «nota crédito» —con
+tilde, contra un texto al que se le quitaron las tildes— no encontraba nada y
+las notas crédito **sumaban** al ingreso en vez de restarlo, el doble de su
+valor. Lo mismo del lado de las compras, inflando el IVA descontable.
+
+En el reporte de **emitidos** el documento soporte con no obligados y sus notas
+de ajuste no son ingreso —son compras a personas naturales—; en el de
+**recibidos** el documento soporte sí es una compra legítima. De ahí que
+`clasificar` reciba el lado.
+
 Lo único que no sale de la facturación electrónica es el **aporte a pensión**
 (planilla PILA, otro sistema). Se captura en la ficha o en el formulario de la
 web; sin él el anticipo sale más alto de lo que el contribuyente debe pagar, y
@@ -83,6 +114,28 @@ está en amarillo a propósito.
   precalculados**. Se capturan y se usan como validación.
 - `S.SOCIAL` es un reporte de PILA con maquetación libre (un bloque por
   administradora), no una tabla.
+
+## Por qué se recalcula en Excel, y no basta con Python
+
+`rst\verificar.ps1` abre el libro en Excel real y recalcula. No es un lujo:
+openpyxl **escribe** fórmulas, no las evalúa, así que la aritmética de Python y
+la del libro son dos implementaciones distintas de lo mismo y pueden
+divergir sin que ninguna prueba de Python lo note.
+
+Ya pasó dos veces, y las dos se cazaron ahí:
+
+- La tarifa se busca con un `SUMIFS` sobre la tabla del art. 908. Una base por
+  encima del último tramo (16.666 UVT bimestrales) no casaba con ninguna fila:
+  Excel devolvía **0 %** y un anticipo de **$0**, mientras Python aplicaba la
+  tarifa mayor. Ahora la fórmula acota la base al rango de la tabla antes de
+  buscar.
+- El descuento por pensión hacía `-MIN(pensión; F29)` sobre el componente
+  nacional sin acotar: con un componente negativo el `MIN` se quedaba con el
+  negativo y la resta lo convertía en un descuento **positivo**, que sumaba.
+  Ahora es `MAX(0;F29)`, la misma guarda que tiene Python.
+
+`python -m rst.pruebas` comprueba que esas dos cotas sigan en las fórmulas, pero
+la comprobación de verdad es abrir el libro.
 
 ## Caso de referencia
 

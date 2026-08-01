@@ -161,6 +161,13 @@ def main():
                 'el apartado ofrece el formulario de carga')
         t = testigo(html)
         revisar(bool(t), 'el formulario trae el testigo anti-CSRF')
+        # El bimestre lo pone el archivo, no el usuario: dejarlo preseleccionado
+        # en 1 hacía que un consolidado de mayo-junio se liquidara como
+        # enero-febrero y saliera un libro entero en ceros.
+        revisar('Detectar del archivo' in html,
+                'el bimestre se puede dejar en «detectar del archivo»')
+        revisar('Elija el grupo' in html,
+                'el grupo de actividad no viene preseleccionado: define la tarifa')
 
         # ── un recibo ya cargado ──────────────────────────────────────
         lista = rst_nube.listar(s)
@@ -202,6 +209,21 @@ def main():
         malos.update({'tarifa_ica': '12,5', 'ano': '2099'})
         code, html, _ = nav.subir('/rst/subir', malos, 'x.xlsx', b'no es un excel')
         revisar('UVT' in html, 'un año sin UVT cargada se rechaza y lo dice')
+
+        # El grupo sí es obligatorio: define la tarifa y puede duplicar el
+        # impuesto, así que no hay valor por defecto que valga.
+        malos.update({'ano': '2026', 'grupo': ''})
+        code, html, _ = nav.subir('/rst/subir', malos, 'x.xlsx', b'no es un excel')
+        revisar('grupo de actividad' in html,
+                'sin grupo de actividad no se procesa')
+
+        # El bimestre en blanco NO es un error: significa «detectar del
+        # archivo». Tiene que pasar la validación de la ficha y morir después,
+        # al leer el .xlsx falso.
+        malos.update({'grupo': '3', 'bimestre': ''})
+        code, html, _ = nav.subir('/rst/subir', malos, 'x.xlsx', b'no es un excel')
+        revisar('bimestre debe ir de 1 a 6' not in html,
+                'el bimestre en blanco se acepta: se detecta del archivo')
 
         # ── un cliente no manda ───────────────────────────────────────
         uc = 'zzrst' + secrets.token_hex(4)

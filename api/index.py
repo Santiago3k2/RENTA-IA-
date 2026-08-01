@@ -740,16 +740,22 @@ class handler(BaseHTTPRequestHandler):
         nit = campo('nit')
         if not nombre or not nit:
             raise ValueError('Faltan la razón social o el NIT del contribuyente.')
+        # El bimestre puede venir vacío: significa «detectar del archivo», que
+        # es lo normal. Lo resuelve `rst_generar.resolver_periodo` con las
+        # fechas de los documentos, y así nadie tiene que acertarlo.
+        crudo_bim = campo('bimestre')
         try:
             ano = int(campo('ano') or 0)
-            bimestre = int(campo('bimestre') or 0)
+            bimestre = int(crudo_bim) if crudo_bim else None
             grupo = int(campo('grupo') or 0)
         except ValueError:
             raise ValueError('El año, el bimestre y el grupo deben ser números.')
-        if bimestre not in rst_parametros.BIMESTRES:
-            raise ValueError('El bimestre debe ir de 1 a 6.')
+        if bimestre is not None and bimestre not in rst_parametros.BIMESTRES:
+            raise ValueError('El bimestre debe ir de 1 a 6, o dejarse en blanco para '
+                             'detectarlo del archivo.')
         if grupo not in rst_parametros.TARIFAS:
-            raise ValueError('El grupo de actividad SIMPLE debe ir de 1 a 4.')
+            raise ValueError('Elija el grupo de actividad SIMPLE: define la tarifa y no '
+                             'hay un valor por defecto razonable.')
         rst_parametros.uvt(ano)          # falla claro si no está cargada la UVT
 
         # La tarifa de ICA se pide «por mil» porque así la publican los acuerdos

@@ -17,17 +17,46 @@ import re
 
 import openpyxl
 
-# Tipos de documento del reporte de emitidos que NO son ingreso.
-# «Documento soporte con no obligados a facturar» (prefijo DSE) son COMPRAS a
-# personas naturales; contarlos como ventas infla la base del anticipo.
-NO_SON_INGRESO = ('documento soporte', 'application response', 'nomina', 'nómina')
-
-NOTA_CREDITO = 'nota crédito'
-NOTA_DEBITO = 'nota débito'
+from . import parametros as P
 
 
 class ErrorLectura(Exception):
     """El archivo no es el consolidado esperado."""
+
+
+# ------------------------------------------------------- tipos de documento
+
+def clasificar(tipo, lado='emitidos'):
+    """«Tipo de documento» de la DIAN → (entra al agregado, signo).
+
+    El signo es −1 para las notas crédito, que RESTAN del período, y +1 para
+    todo lo demás, notas débito incluidas.
+
+    La clasificación se hace sobre el nombre normalizado —sin tildes— y por
+    palabras sueltas, no por la frase completa: la DIAN escribe «Nota de
+    crédito electrónica», así que buscar el literal «nota crédito» no encuentra
+    nada y las notas crédito terminan SUMANDO al ingreso en vez de restarlo.
+
+    En el reporte de EMITIDOS viajan documentos que no son ingreso: el
+    documento soporte con no obligados a facturar (prefijo DSE) y sus notas de
+    ajuste son COMPRAS a personas naturales, la nómina electrónica es un gasto
+    y los «application response» son acuses de recibo. En el de RECIBIDOS el
+    documento soporte sí es una compra legítima.
+    """
+    tn = _norm(tipo)
+    if not tn:
+        return False, 1
+    if 'application response' in tn or 'nomina' in tn:
+        return False, 1
+    if lado == 'emitidos' and 'documento soporte' in tn:
+        return False, 1
+    if 'nota' in tn and 'credito' in tn:
+        return True, -1
+    return True, 1
+
+
+def _contar(conteo, clave):
+    conteo[clave] = conteo.get(clave, 0) + 1
 
 
 # ---------------------------------------------------------------- utilidades
@@ -130,7 +159,7 @@ def _hoja_prefijo(wb, prefijo):
 
 # ------------------------------------------------------------------ lectores
 
-def _leer_ventas(ws, avisos):
+def _leer_ventas(ws, avisos, conteo):
     enc = next(ws.iter_rows(max_row=1, values_only=True))
     idx = _indices(enc)
     faltan = [c for c in ('ing gravados', 'ing.no gravado', 'iva', 'total') if c not in idx]
@@ -149,16 +178,20 @@ def _leer_ventas(ws, avisos):
     ventas, descartadas, cola = [], 0, []
     for f in _filas(ws):
         tipo = str(f[idx.get('tipo de documento', 0)] or '')
-        tn = _norm(tipo)
-        if not tn:
+        conteo['filas'] = conteo.get('filas', 0) + 1
+        if not _norm(tipo):
             cola.append(f)          # filas de totales al pie del reporte
+            _contar(conteo, 'pie')
             continue
-        if any(tn.startswith(x) for x in NO_SON_INGRESO):
+        entra, signo = clasificar(tipo, 'emitidos')
+        if not entra:
             descartadas += 1
+            _contar(conteo, 'excluidos')
             continue
-        signo = -1 if NOTA_CREDITO in tn else 1
+        _contar(conteo, 'notas_credito' if signo < 0 else 'ingresos')
         ventas.append({
             'tipo': tipo,
+            'nota_credito': signo < 0,
             'fecha': _fecha(f[idx['fecha emision']] if 'fecha emision' in idx else None),
             'prefijo': str(f[idx.get('prefijo', 3)] or '').strip(),
             'folio': str(f[idx.get('folio', 2)] or '').strip(),
@@ -218,13 +251,13 @@ def _leer_compras(ws, avisos):
 
     compras, cola = [], []
     for f in _filas(ws):
-        tn = _norm(str(f[idx.get('tipo de documento', 0)] or ''))
-        if not tn:
+        tipo = str(f[idx.get('tipo de documento', 0)] or '')
+        if not _norm(tipo):
             cola.append(f)
             continue
-        if tn.startswith('application response'):
+        entra, signo = clasificar(tipo, 'recibidos')
+        if not entra:
             continue
-        signo = -1 if NOTA_CREDITO in tn else 1
         iva = signo * _num(f[idx['iva']])
         base = signo * _num(f[i_base]) if i_base is not None else 0.0
         compras.append({
@@ -317,7 +350,7 @@ def _leer_seg_social(ws, avisos):
 
 # ------------------------------------------- modo crudo: solo Rp_Doc / Rp_Docpras
 
-def _derivar_ventas(ws, avisos, tarifa_iva, tarifa_reteiva):
+def _derivar_ventas(ws, avisos, conteo, tarifa_iva, tarifa_reteiva):
     """Ventas a partir del reporte crudo de documentos emitidos de la DIAN.
 
     El reporte solo trae IVA y Total; el desglose se deduce, y da exacto:
@@ -336,26 +369,36 @@ def _derivar_ventas(ws, avisos, tarifa_iva, tarifa_reteiva):
             raise ErrorLectura('El reporte de documentos emitidos no trae la columna %s.'
                                % c.upper())
 
+    # El IVA viene ya redondeado al peso en la factura, así que dividirlo entre
+    # la tarifa devuelve la base con un error de hasta medio peso ÷ tarifa. Por
+    # debajo de ese umbral el «no gravado» que sobra es ruido del redondeo, no
+    # un ingreso excluido: se le devuelve al gravado y la factura queda limpia.
+    # Con el umbral fijo de un peso que había antes, una factura íntegramente
+    # gravada salía con un «no gravado» negativo de un par de pesos.
+    ruido = 0.5 / tarifa_iva + 1.0
+
     ventas, descartadas = [], 0
     for f in _filas(ws):
         tipo = str(f[idx.get('tipo de documento', 0)] or '')
-        tn = _norm(tipo)
-        if not tn:
+        conteo['filas'] = conteo.get('filas', 0) + 1
+        if not _norm(tipo):
+            _contar(conteo, 'pie')
             continue
-        if any(tn.startswith(x) for x in NO_SON_INGRESO):
+        entra, signo = clasificar(tipo, 'emitidos')
+        if not entra:
             descartadas += 1
+            _contar(conteo, 'excluidos')
             continue
-        signo = -1 if NOTA_CREDITO in tn else 1
+        _contar(conteo, 'notas_credito' if signo < 0 else 'ingresos')
         iva = _num(f[idx['iva']])
         total = _num(f[idx['total']])
         gravado = iva / tarifa_iva if iva else 0.0
         no_gravado = total - gravado - iva
-        # Redondeo de la división: por debajo de un peso es ruido de coma
-        # flotante, no un ingreso excluido.
-        if abs(no_gravado) < 1:
-            no_gravado = 0.0
+        if abs(no_gravado) < ruido:
+            gravado, no_gravado = total - iva, 0.0
         ventas.append({
             'tipo': tipo,
+            'nota_credito': signo < 0,
             'fecha': _fecha(f[idx['fecha emision']] if 'fecha emision' in idx else None),
             'prefijo': str(f[idx.get('prefijo', 3)] or '').strip(),
             'folio': str(f[idx.get('folio', 2)] or '').strip(),
@@ -384,15 +427,13 @@ def _derivar_compras(ws, avisos, tarifa_iva):
 
     compras, acuses = [], 0
     for f in _filas(ws):
-        tn = _norm(str(f[idx.get('tipo de documento', 0)] or ''))
-        if not tn:
+        tipo = str(f[idx.get('tipo de documento', 0)] or '')
+        if not _norm(tipo):
             continue
-        if tn.startswith('application response'):
-            acuses += 1          # son acuses de recibo, no documentos contables
+        entra, signo = clasificar(tipo, 'recibidos')
+        if not entra:
+            acuses += 1          # acuses de recibo y nómina: no son compras
             continue
-        if tn.startswith('nomina') or tn.startswith('nómina'):
-            continue
-        signo = -1 if NOTA_CREDITO in tn else 1
         iva = _num(f[idx['iva']])
         compras.append({
             'fecha': _fecha(f[idx['fecha emision']] if 'fecha emision' in idx else None),
@@ -405,8 +446,9 @@ def _derivar_compras(ws, avisos, tarifa_iva):
             'total': signo * _num(f[idx['total']]),
         })
     if acuses:
-        avisos.append('Del reporte de recibidos se excluyeron %d «Application response»: '
-                      'son acuses de recibo, no documentos contables.' % acuses)
+        avisos.append('Del reporte de recibidos se excluyeron %d documentos que no son '
+                      'compra: «Application response» (acuses de recibo) y nómina '
+                      'electrónica.' % acuses)
     return compras
 
 
@@ -434,6 +476,27 @@ def _derivar_reteiva(ventas, tarifa_reteiva):
     return agentes
 
 
+def periodos(ventas):
+    """Períodos (año, bimestre) presentes en el archivo, del más cargado al menos.
+
+    Es lo que evita tener que acertar el bimestre a mano: el archivo ya dice de
+    qué período es. Un consolidado descargado para un bimestre trae un solo
+    período; si trae varios, el primero de la lista es el que manda y los demás
+    quedan a la vista para procesarlos aparte.
+    """
+    cajas = {}
+    for v in ventas:
+        f = v['fecha']
+        if not f:
+            continue
+        clave = (f.year, P.bimestre_de(f.month))
+        c = cajas.setdefault(clave, {'ano': clave[0], 'bimestre': clave[1],
+                                     'documentos': 0, 'total': 0.0})
+        c['documentos'] += 1
+        c['total'] += v['total']
+    return sorted(cajas.values(), key=lambda c: (-c['documentos'], c['ano'], c['bimestre']))
+
+
 # ------------------------------------------------------------------- fachada
 
 def leer(ruta, tarifa_iva=0.19, tarifa_reteiva=0.15):
@@ -450,6 +513,7 @@ def leer(ruta, tarifa_iva=0.19, tarifa_reteiva=0.15):
       manda sobre lo que el motor deduciría.
     """
     avisos = []
+    conteo = {}
     wb = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
     try:
         hv = _hoja(wb, 'F.VENTA')
@@ -459,7 +523,7 @@ def leer(ruta, tarifa_iva=0.19, tarifa_reteiva=0.15):
 
         if hv is not None:
             origen = 'trabajado'
-            ventas, tot_ventas = _leer_ventas(hv, avisos)
+            ventas, tot_ventas = _leer_ventas(hv, avisos, conteo)
             if hc is not None:
                 compras, tot_compras = _leer_compras(hc, avisos)
             else:
@@ -468,7 +532,7 @@ def leer(ruta, tarifa_iva=0.19, tarifa_reteiva=0.15):
                               'queda en cero.')
         elif emitidos is not None:
             origen = 'crudo'
-            ventas = _derivar_ventas(emitidos, avisos, tarifa_iva, tarifa_reteiva)
+            ventas = _derivar_ventas(emitidos, avisos, conteo, tarifa_iva, tarifa_reteiva)
             tot_ventas = {}
             if recibidos is not None:
                 compras = _derivar_compras(recibidos, avisos, tarifa_iva)
@@ -511,12 +575,21 @@ def leer(ruta, tarifa_iva=0.19, tarifa_reteiva=0.15):
     finally:
         wb.close()
 
+    notas = [v for v in ventas if v.get('nota_credito')]
+    if notas:
+        avisos.append('Se detectaron %d nota(s) crédito por $%s: se restaron del ingreso '
+                      'del período.'
+                      % (len(notas),
+                         f'{abs(sum(v["total"] for v in notas)):,.2f}'.replace(',', '.')))
+
     return {
         'origen': origen,
         'ventas': ventas,
         'compras': compras,
         'reteiva': reteiva,
         'seg_social': seg,
+        'periodos': periodos(ventas),
+        'clasificacion': conteo,
         'totales_declarados': {'ventas': tot_ventas, 'compras': tot_compras},
         'conteo_reportes': {'emitidos': n_emitidos, 'recibidos': n_recibidos},
         'avisos': avisos,

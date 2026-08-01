@@ -18,6 +18,7 @@ import sys
 from . import calculos
 from . import lector
 from . import libro
+from . import parametros as P
 
 
 def cargar_ficha(ruta):
@@ -27,9 +28,51 @@ def cargar_ficha(ruta):
     return dict(mod.FICHA)
 
 
+def resolver_periodo(ficha, fuente):
+    """Deja en la ficha el año y el bimestre que se van a liquidar.
+
+    El período no hay que adivinarlo: las fechas del archivo ya dicen de qué
+    bimestre es. Si la ficha no lo trae —que es lo normal—, se toma el período
+    con más documentos y se anota en `_periodo_auto` para que el libro y la web
+    puedan decir de dónde salió.
+
+    Si la ficha SÍ lo trae y el archivo no tiene un solo documento de ese
+    período teniendo documentos de otros, se aborta con un mensaje que nombra el
+    correcto. Antes eso salía adelante y producía un libro entero en ceros: una
+    declaración vacía que parecía válida es peor que un error.
+    """
+    disponibles = fuente.get('periodos') or []
+    pedido = ficha.get('bimestre')
+    if pedido:
+        ficha['_periodo_auto'] = ''
+        if disponibles and not any(p['bimestre'] == int(pedido)
+                                   and p['ano'] == int(ficha['ano']) for p in disponibles):
+            raise ValueError(
+                'El archivo no trae ningún documento de %s de %s, que es el período que '
+                'se pidió liquidar. Lo que trae es: %s. Procéselo con ese período —o deje '
+                'el bimestre en «detectar del archivo»— porque así como está la '
+                'declaración saldría en ceros.'
+                % (P.nombre_bimestre(int(pedido)).lower(), ficha['ano'],
+                   P.describir_periodos(disponibles)))
+        return ficha
+
+    if not disponibles:
+        raise ValueError(
+            'El archivo no trae documentos con fecha, así que no se puede deducir de qué '
+            'bimestre es. Indique el bimestre a mano.')
+
+    elegido = disponibles[0]
+    ficha['ano'] = elegido['ano']
+    ficha['bimestre'] = elegido['bimestre']
+    ficha['_periodo_auto'] = P.describir_periodos([elegido])
+    P.uvt(elegido['ano'])        # falla claro si no está cargada la UVT de ese año
+    return ficha
+
+
 def procesar(ruta_consolidado, ficha):
     """Consolidado + ficha → (liquidación, workbook). Sin tocar disco."""
     fuente = lector.leer(ruta_consolidado)
+    resolver_periodo(ficha, fuente)
     liq = calculos.liquidar(ficha, fuente)
     return liq, libro.construir(liq, ficha)
 
@@ -45,7 +88,9 @@ def main(argv=None):
     ap.add_argument('--consolidado', required=True,
                     help='Exportación de documentos electrónicos de la DIAN (.xlsx)')
     ap.add_argument('--ficha', required=True, help='Ficha del contribuyente (.py)')
-    ap.add_argument('--bimestre', type=int, help='Sobrescribe el bimestre de la ficha')
+    ap.add_argument('--bimestre', type=int,
+                    help='Fuerza el bimestre. Si se omite y la ficha no lo trae, se '
+                         'deduce de las fechas del archivo.')
     ap.add_argument('--ano', type=int, help='Sobrescribe el año gravable de la ficha')
     ap.add_argument('--salida', help='Ruta del libro a escribir')
     a = ap.parse_args(argv)
@@ -63,9 +108,15 @@ def main(argv=None):
 
     pesos = libro._pesos
     print('%s — NIT %s' % (ficha['nombre'], ficha['nit']))
-    print('Bimestre %d (%s) de %d · grupo %d · UVT $%s'
+    print('Bimestre %d (%s) de %d · grupo %d · UVT $%s%s'
           % (liq['bimestre'], liq['nombre_bimestre'], liq['ano'], liq['grupo'],
-             pesos(liq['uvt'])))
+             pesos(liq['uvt']),
+             '  [detectado del archivo]' if ficha.get('_periodo_auto') else ''))
+    otros = [p for p in liq['periodos_del_archivo']
+             if (p['ano'], p['bimestre']) != (liq['ano'], liq['bimestre'])]
+    if otros:
+        print('AVISO: el archivo trae además %s — se procesan aparte.'
+              % P.describir_periodos(otros))
     print('-' * 64)
     print('  Base del anticipo        $%14s  (%.2f UVT)' % (pesos(liq['base']), liq['base_uvt']))
     print('  Tarifa                    %14s' % ('%.1f %%' % (liq['tarifa'] * 100)))

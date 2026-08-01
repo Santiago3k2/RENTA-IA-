@@ -116,3 +116,25 @@ def nombre_bimestre(n):
 
 def meses_bimestre(n):
     return BIMESTRES[n][1]
+
+
+def bimestre_de(mes):
+    """Bimestre al que pertenece un mes. Es la inversa de `meses_bimestre`."""
+    for n, (_, meses) in BIMESTRES.items():
+        if mes in meses:
+            return n
+    raise KeyError('Mes inválido: %r (debe ser 1 a 12)' % mes)
+
+
+def describir_periodos(lista):
+    """«mayo y junio de 2026 (bimestre 3, 8.270 documentos)», para los mensajes.
+
+    Recibe la salida de `lector.periodos`. Vive aquí, y no en el lector, porque
+    quien sabe cómo se llama un bimestre es este módulo, y tanto el lector como
+    la liquidación lo necesitan.
+    """
+    return '; '.join(
+        '%s de %d (bimestre %d, %s documento%s)'
+        % (nombre_bimestre(c['bimestre']).lower(), c['ano'], c['bimestre'],
+           f'{c["documentos"]:,}'.replace(',', '.'), '' if c['documentos'] == 1 else 's')
+        for c in lista)
