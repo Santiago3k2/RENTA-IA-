@@ -541,9 +541,9 @@ Al entrar, se le exigirá cambiarla.</span></div></div></div>"""
 
 <div class="peligro-caja">
   <h2>Eliminar esta cuenta</h2>
-  <p>Borra a <b>{e(u['usuario'])}</b> de forma definitiva. En la pantalla siguiente
-  decidirá qué pasa con sus {usadas} declaración(es): puede conservarlas en la cartera
-  o borrarlas también, con sus libros y sus exógenas. No hay papelera.</p>
+  <p>Borra a <b>{e(u['usuario'])}</b> de forma definitiva. Sus {usadas} declaración(es)
+  se conservan en la cartera: son papeles de trabajo de contribuyentes reales y no
+  propiedad de quien las subió. No hay papelera para la cuenta.</p>
   <form method="get" action="/admin/cuenta/{e(u['id'])}/eliminar">
     <button class="mini peligro firme" type="submit">Continuar con la eliminación</button>
   </form>
@@ -557,21 +557,14 @@ def vista_confirmar_cuenta(u, n_decl, usuario, token):
     """La única pantalla que borra personas. Dice con números qué se pierde."""
     if n_decl:
         opciones = f"""
-<form method="post" action="/admin/cuenta/{e(u['id'])}/eliminar" style="margin-bottom:12px">
-  {_t(token)}<input type="hidden" name="declaraciones" value="conservar">
-  <button class="mini sec" type="submit" style="padding:9px 15px">
-    Eliminar solo la cuenta y conservar sus {n_decl} declaración(es)</button></form>
 <form method="post" action="/admin/cuenta/{e(u['id'])}/eliminar">
-  {_t(token)}<input type="hidden" name="declaraciones" value="eliminar">
+  {_t(token)}<input type="hidden" name="declaraciones" value="conservar">
   <button class="mini peligro firme" type="submit" style="padding:9px 15px">
-    Eliminar la cuenta y también sus {n_decl} declaración(es)</button></form>"""
+    Sí, eliminar la cuenta y conservar sus {n_decl} declaración(es)</button></form>"""
         explicacion = f"""<p>Esta cuenta ha cargado <b>{n_decl} declaración(es)</b>.
-Son papeles de trabajo de contribuyentes reales, así que el sistema no decide por usted:</p>
-<ul style="margin:0 0 16px 20px;font-size:12.8px;color:#7A271A;line-height:1.7">
-<li><b>Conservarlas</b> — siguen en la cartera y usted las sigue viendo. Quedan a nombre
-de un usuario que ya no existe, lo que el panel muestra tal cual.</li>
-<li><b>Eliminarlas</b> — se van las declaraciones, sus alertas, sus libros y las exógenas
-que subió. Si algún contribuyente se queda sin ningún caso, se borra también su ficha.</li></ul>"""
+Se quedan donde están: son papeles de trabajo de contribuyentes reales, no propiedad de
+quien las subió, y las declaraciones no se eliminan en ningún caso. Seguirán en la cartera
+a nombre de un usuario que ya no existe, y el panel lo muestra tal cual.</p>"""
     else:
         opciones = f"""
 <form method="post" action="/admin/cuenta/{e(u['id'])}/eliminar">
@@ -673,7 +666,6 @@ def _fila_declaracion(d, token, compacta=False):
 <td class="mono-t">{e(cuentas.hace_cuanto(d.get('creado_en')))}</td>
 <td><div class="acc-fila">
   <a class="mini sec" href="/caso/{e(d['id'])}">Ver</a>
-  <a class="mini sec" href="/admin/declaracion/{e(d['id'])}/eliminar">Eliminar</a>
 </div></td></tr>"""
 
 
@@ -689,42 +681,13 @@ def vista_declaraciones(lista, usuario, token, error='', hecho=''):
     <th style="width:120px">Cuándo</th><th style="width:150px"></th>
   </tr></thead><tbody>{filas}</tbody></table>
 </div>
-<div class="aviso"><b>Eliminar una declaración</b> se lleva su fila, sus alertas, el libro
-de nueve hojas y la exógena que la originó. Si el contribuyente se queda sin ningún caso,
-su ficha también desaparece: son un nombre y una cédula sujetos a reserva, y sin caso al
-que pertenecer no hay razón para conservarlos. Eliminar libera cupo del usuario que la
-había cargado.</div>"""
+<div class="aviso"><b>Las declaraciones no se eliminan.</b> Una vez procesada, la
+declaración queda en la cartera y el cupo que consumió sigue consumido. Es deliberado:
+el cupo es lo que se vende, y si borrar lo devolviera, una cuenta de cupo 1 podría
+procesar sin límite subiendo, borrando y volviendo a subir. Para dejar de dar servicio a
+una cuenta, inhabilítela; para ampliarla, súbale el cupo desde su ficha.</div>"""
     return _pagina('Declaraciones', cuerpo, 'TODAS LAS DECLARACIONES', usuario,
                    'admin', 'declaraciones', error, hecho)
-
-
-def vista_confirmar_declaracion(d, usuario, token, volver='/admin/declaraciones'):
-    persona = (d.get('contribuyentes') or {}).get('nombre_titulo', 'Sin nombre')
-    ident = (d.get('contribuyentes') or {}).get('identificacion', '')
-    archivos = []
-    if d.get('libro_path'):
-        archivos.append('el libro de nueve hojas')
-    if d.get('exogena_path'):
-        archivos.append('la exógena que subió')
-    lista_archivos = (' Se borrarán también ' + ' y '.join(archivos) + '.'
-                      if archivos else '')
-    cuerpo = f"""
-<div class="migas"><a href="{e(volver)}">&larr; Volver</a></div>
-<div class="peligro-caja">
-  <h2>¿Eliminar esta declaración?</h2>
-  <p><b>{e(persona)}</b> · {e(ident)} · año gravable <b>{e(d.get('ano_gravable', ''))}</b><br>
-  La cargó <b>{e(d.get('creada_por') or '—')}</b>.</p>
-  <p>Desaparecen la declaración y todas sus alertas.{e(lista_archivos)}
-  Si es el único caso de este contribuyente, se elimina también su ficha.
-  No hay papelera y la acción queda escrita en la bitácora a su nombre.</p>
-  <form method="post" action="/admin/declaracion/{e(d['id'])}/eliminar">{_t(token)}
-    <input type="hidden" name="volver" value="{e(volver)}">
-    <button class="mini peligro firme" type="submit" style="padding:9px 15px">
-      Sí, eliminarla definitivamente</button></form>
-  <p style="margin-top:16px"><a href="{e(volver)}">No, cancelar</a></p>
-</div>"""
-    return _pagina('Eliminar declaración', cuerpo, 'CONFIRMAR LA ELIMINACIÓN',
-                   usuario, 'admin', 'declaraciones')
 
 
 # ── bitácora ────────────────────────────────────────────────────────────

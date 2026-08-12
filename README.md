@@ -152,13 +152,19 @@ El **cupo** es cuántas declaraciones puede procesar esa cuenta en total. Se
 comprueba en el servidor, no ocultando el botón, y un cliente no puede
 sobrescribir un caso cargado por otro.
 
+Una declaración **no se elimina desde ninguna parte del sitio**: ni su dueño ni
+el administrador pueden borrarla, y eliminar una cuenta conserva las suyas. El
+cupo es lo que se vende, y si borrar lo devolviera, una cuenta de cupo 1 podría
+procesar sin límite subiendo, borrando y volviendo a subir. Para cortarle el
+servicio a alguien se inhabilita la cuenta; para ampliárselo, se le sube el cupo.
+
 El panel (`/admin`, solo para el rol administrador) tiene cinco secciones:
 
 - **Panel** — cuentas por aprobar, cuentas bloqueadas, cifras y últimos movimientos.
 - **Cuentas** — aprobar, inhabilitar, cambiar rol y cupo, editar datos,
   restablecer la contraseña, cerrar sesiones a distancia y eliminar.
-- **Declaraciones** — todas las de la plataforma, con borrado que se lleva
-  también las alertas, el libro y la exógena del Storage.
+- **Declaraciones** — todas las de la plataforma, para consultarlas. No se
+  borran: ver arriba por qué.
 - **Bitácora** — quién entró, qué miró y qué borró, con la hora y la dirección IP.
 - **Ajustes** — abrir o cerrar el registro, exigir aprobación previa, fijar el
   cupo con el que nace una cuenta y poner un aviso en la bandeja. Cambian el

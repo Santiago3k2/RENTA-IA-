@@ -295,12 +295,16 @@ def build(wb, A, C, T):
     # ══════════════ CONCILIACIÓN PATRIMONIAL  (NOTA 10) ══════════════
     s.hero('CONCILIACIÓN PATRIMONIAL', None, val_col='H', h=26.0)
     s.gap(5.0)
+    # La comparación patrimonial del art. 236 E.T. se hace sobre patrimonio
+    # LÍQUIDO, no bruto: lo que debe justificarse es el incremento del neto.
+    # De la exógena solo llega el bruto del año anterior, así que las deudas
+    # de ese año quedan como casilla abierta en vez de darlas por cero.
     r = s.datarow(h=20.5)
-    s.txt(r, 'B', f'Patrimonio Bruto Declarado {ag}', 'G', sz=10.0, v='center')
-    s.money(r, 'H', f'=H{bruto_r}', sz=10.0)
-    p25 = r
+    s.txt(r, 'B', f'Patrimonio Líquido Declarado {ag}', 'G', sz=10.0, v='center')
+    s.money(r, 'H', f'=H{A["pat_liq"]}', sz=10.0)
+    liq_ag = r
     r = s.datarow(zebra=True, h=20.5)
-    s.txt(r, 'B', f'Patrimonio Bruto Declarado {ant}', 'G', sz=10.0, v='center')
+    s.txt(r, 'B', f'Patrimonio Bruto Declarado {ant}  ·  renglón 29', 'G', sz=10.0, v='center')
     s.mark_input(r, 'H')
     s.money(r, 'H', C['patrimonio_bruto_anterior'], sz=10.0)
     p24 = r
@@ -310,11 +314,26 @@ def build(wb, A, C, T):
         f'del año gravable {ant}. La exógena lo informa como referencia\n'
         f'({fmt_pesos(C["patrimonio_bruto_anterior"])}); confírmelo contra la declaración presentada.',
         AUT, 300, 90)
+    r = s.datarow(h=20.5)
+    s.txt(r, 'B', f'(−) Deudas Declaradas {ant}  ·  renglón 30', 'G', sz=10.0, v='center')
+    s.mark_input(r, 'H')
+    s.money(r, 'H', None, sz=10.0)
+    deu24 = r
+    A['deudas_2024'] = deu24
+    ws[f'H{deu24}'].comment = Comment(
+        f'NOTA 10 — Renglón 30 de la declaración del año gravable {ant}.\n'
+        f'La exógena no lo informa: mientras esta casilla siga vacía, la\n'
+        f'conciliación compara contra el patrimonio BRUTO del año anterior\n'
+        f'y la diferencia queda sobrestimada.', AUT, 320, 100)
+    r = s.datarow(zebra=True, h=20.5)
+    s.txt(r, 'B', f'Patrimonio Líquido Declarado {ant}', 'G', sz=10.0, b=True, v='center')
+    s.money(r, 'H', f'=H{p24}-N(H{deu24})', sz=10.0, b=True)
+    liq_ant = r
     r = s.datarow(h=22.0)
     s.txt(r, 'B', 'Diferencia Patrimonial Sin Justificar', 'G', sz=10.5, b=True, color=RED, v='center')
-    s.money(r, 'H', f'=H{p25}-H{p24}', sz=11.5, b=True, color=RED, fmt=NUM)
+    s.money(r, 'H', f'=H{liq_ag}-H{liq_ant}', sz=11.5, b=True, color=RED, fmt=NUM)
     A['pat_dif'] = r
-    s.note(f'NOTA 10 — La conciliación enfrenta el patrimonio bruto reconstruido para {ag} contra el declarado en {ant}. La diferencia se muestra en rojo y entre paréntesis cuando es negativa.', h=17.55)
+    s.note(f'NOTA 10 — La comparación patrimonial del art. 236 E.T. se hace sobre el patrimonio líquido: enfrenta el reconstruido para {ag} —bruto menos deudas— contra el declarado en {ant}. Del año anterior la exógena solo informa el bruto, así que las deudas de {ant} quedan como casilla editable: tómelas del renglón 30 de esa declaración. La diferencia se muestra en rojo y entre paréntesis cuando es negativa.', h=29.25)
     s.gap()
     if T.get('callout_brecha'):
         titulo, cuerpo = T['callout_brecha']

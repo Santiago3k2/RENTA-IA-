@@ -46,6 +46,22 @@ def build(wb, A, C, T):
             FormulaRule(formula=[f'F{r0}<>0'], font=Font(bold=True, color=RED)))
         return r0, r1
 
+    def tope60(subcedula, ref):
+        """Línea de control del 60%: es un límite, no una partida de la depuración.
+
+        Va como referencia y no como subtotal a propósito. Puesto en negrita al
+        pie de la depuración se lee como un costo más —uno que además nadie ha
+        certificado—, cuando lo único que dice es hasta dónde podrían llegar los
+        costos el día que el contribuyente los soporte.
+        """
+        r = s.datarow(h=19.0)
+        s.txt(r, 'B',
+              f'Control · límite máximo de costos y deducciones de {subcedula} — '
+              f'60% de sus ingresos. Es un tope, no un valor a declarar.',
+              'F', sz=8.6, i=True, color=MUTED, v='center')
+        s.money(r, 'G', f'=ROUND(G{ref}*0.6,0)', sz=9.2, b=True, color=GOLD)
+        return r
+
     # ══════════════ RENTAS DE TRABAJO — R32 ══════════════
     s.section('RENTAS DE TRABAJO — R32 (ART. 103 E.T.)')
     s.head(HEAD)
@@ -102,12 +118,12 @@ def build(wb, A, C, T):
     A['exentas_trab'] = s.subtotal('Subtotal rentas exentas de trabajo', f'=SUM(G{x0}:G{x1})')
     s.gap()
 
-    tope_t = s.r
-    s.subtotal('Tope de costos y deducciones · 60% de los ingresos de rentas de trabajo — no puede superarse',
-               f'=ROUND(G{A["r32"]}*0.6,0)', accent=GOLD, tint=GOLD_T)
+    tope_t = tope60('las rentas de trabajo', A['r32'])
     ws[f'G{tope_t}'].comment = Comment(
         'NOTA 13 — 60% de los ingresos de esta subcédula.\n'
-        'Los costos y deducciones imputables no pueden superar este porcentaje.', AUT, 300, 70)
+        'Es el techo de los costos y deducciones imputables, no un valor\n'
+        'que se declare: mientras no haya costos certificados, la depuración\n'
+        'de esta subcédula va en cero.', AUT, 320, 90)
     A['tope60_trab'] = tope_t
     s.gap(); s.gap()
 
@@ -137,10 +153,7 @@ def build(wb, A, C, T):
         'NOTA 13 — Casilla editable para los costos y deducciones procedentes\n'
         'de esta subcédula. No deben superar el tope del 60% que aparece abajo.', AUT, 300, 70)
     s.note('NOTA 13 — Las rentas de capital admiten ingresos no constitutivos de renta y costos y deducciones procedentes (art. 339 E.T.). Diligéncielos con los soportes: no se informan en la exógena y son plenamente procedentes con certificado.', h=22.0)
-    tope_c = s.r
-    s.subtotal('Tope de costos y deducciones · 60% de los ingresos de rentas de capital — no puede superarse',
-               f'=ROUND(G{A["r58"]}*0.6,0)', accent=GOLD, tint=GOLD_T)
-    A['tope60_cap'] = tope_c
+    A['tope60_cap'] = tope60('las rentas de capital', A['r58'])
     s.gap()
 
     if T.get('callout_reclasificacion'):
@@ -168,10 +181,11 @@ def build(wb, A, C, T):
     s.txt(r, 'D', 'Art. 341 E.T. — costos y gastos con relación de causalidad, necesidad y proporcionalidad', 'F', sz=8.0, i=True, color=MUTED)
     s.mark_input(r, 'G'); s.money(r, 'G', 0)
     A['costos74'] = r
-    tope_l = s.r
-    s.subtotal('Tope de costos y deducciones · 60% de los ingresos de rentas no laborales — no puede superarse',
-               f'=ROUND(G{A["r74"]}*0.6,0)', accent=GOLD, tint=GOLD_T)
-    A['tope60_nol'] = tope_l
+    ws[f'G{r}'].comment = Comment(
+        'NOTA 13 — Casilla editable para los costos y deducciones procedentes\n'
+        'de esta subcédula. No deben superar el tope del 60% que aparece abajo.', AUT, 300, 70)
+    s.note('NOTA 13 — Las dos casillas anteriores quedan en cero mientras no haya soportes: la exógena no informa costos de esta subcédula. La línea de control de abajo solo dice hasta dónde podrían llegar; no es un valor que se declare.', h=22.0)
+    A['tope60_nol'] = tope60('las rentas no laborales', A['r74'])
     s.gap(); s.gap()
 
     # ══════════════ CONSOLIDADO ══════════════

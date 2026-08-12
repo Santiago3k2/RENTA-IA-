@@ -112,7 +112,6 @@ AVISOS = {
     'desbloqueada': 'Se levantó el bloqueo por intentos fallidos.',
     'creada': 'Cuenta creada.',
     'eliminada': 'Cuenta eliminada.',
-    'decl_eliminada': 'Declaración eliminada, con sus alertas y sus archivos.',
     'decl_estado': 'Estado de la declaración actualizado.',
     'ajustes': 'Ajustes guardados.',
     'clave': 'Su contraseña quedó cambiada.',
@@ -482,17 +481,9 @@ class handler(BaseHTTPRequestHandler):
                 'este caso y lo da por bueno. Es una marca de trabajo, no un envío '
                 'a la DIAN.</p><div class="acc-fila" style="justify-content:flex-start">'
                 + ''.join(botones) + '</div></div></div>')
-        elif caso.get('estado') == 'borrador' and caso.get('creada_por') == ses['usuario']:
-            # Un cliente que subió el archivo equivocado no debería tener que
-            # pedir ayuda para liberar su propio cupo.
-            bloques.append(
-                f'<div class="seccion" style="margin-top:22px"><h2>¿Se equivocó de archivo?</h2>'
-                f'<div class="cuerpo"><p>Puede eliminar esta declaración mientras siga '
-                f'en borrador. Se borran su libro y la exógena que subió, y recupera el '
-                f'cupo. Una vez el contador la tome para revisión, ya no.</p>'
-                f'<form method="get" action="/caso/{e(caso["ref"])}/eliminar">'
-                f'<button class="mini peligro" type="submit">Eliminar esta declaración</button>'
-                f'</form></div></div>')
+        # Una declaración no se elimina desde ninguna parte. El cupo es lo que
+        # se vende: si borrar devolviera el cupo, una cuenta de cupo 1 podría
+        # procesar sin límite subiendo, borrando y volviendo a subir.
         return ''.join(bloques)
 
     def _get_libro(self, ses, ref):
@@ -567,21 +558,6 @@ class handler(BaseHTTPRequestHandler):
                      'declaraciones': self._declaraciones(ses, de=u['usuario'])}
             return self._html(vista_admin.vista_cuenta(
                 u, datos, ses['usuario'], ses['testigo'], err, ok))
-
-        # /admin/declaracion/<id>/eliminar
-        if len(partes) == 4 and partes[1] == 'declaracion' and partes[3] == 'eliminar':
-            filas = ses['s'].seleccionar(
-                'declaraciones',
-                select='id,ano_gravable,creada_por,libro_path,exogena_path,'
-                       'contribuyentes(nombre_titulo,identificacion)',
-                id='eq.' + partes[2])
-            if not filas:
-                return self._error('Esa declaración ya no existe.', 404)
-            volver = consulta.get('volver', '/admin/declaraciones')
-            if not volver.startswith('/admin'):
-                volver = '/admin/declaraciones'
-            return self._html(vista_admin.vista_confirmar_declaracion(
-                filas[0], ses['usuario'], ses['testigo'], volver))
 
         self._error('Esa página del panel no existe.', 404)
 
@@ -1026,18 +1002,9 @@ class handler(BaseHTTPRequestHandler):
             return self._ir(f'/caso/{ref}')
 
         if accion == 'eliminar':
-            # El dueño puede deshacer su propia carga mientras nadie la haya tomado.
-            propio = caso.get('creada_por') == ses['usuario']
-            if not (ses['es_admin'] or (propio and caso.get('estado') == 'borrador')):
-                return self._error('Esta declaración ya no se puede eliminar desde '
-                                   'aquí. Pídaselo al contador.', 403)
-            ses['s'].eliminar_declaracion(ref)
-            ses['cuentas'].anotar('declaracion_eliminada', ses['usuario'], rol=ses['rol'],
-                                  objeto=f"{caso['persona']} · {caso['ano']}",
-                                  detalle='eliminada por su dueño' if propio else
-                                          'eliminada desde la vista del caso',
-                                  ip=self._ip())
-            return self._ir('/')
+            return self._error('Las declaraciones de renta no se eliminan: una vez '
+                               'procesada, la declaración y el cupo que consumió '
+                               'quedan.', 403)
         self._error('Esa acción no existe.', 404)
 
     def _post_subir(self, ses):
@@ -1131,9 +1098,6 @@ class handler(BaseHTTPRequestHandler):
         if len(partes) == 4 and partes[1] == 'cuenta':
             return self._accion_cuenta(ses, partes[2], partes[3], campos)
 
-        if len(partes) == 4 and partes[1] == 'declaracion' and partes[3] == 'eliminar':
-            return self._eliminar_declaracion(ses, partes[2], campos)
-
         self._error('Esa acción del panel no existe.', 404)
 
     def _crear_cuenta(self, ses, campos):
@@ -1221,27 +1185,13 @@ class handler(BaseHTTPRequestHandler):
             if accion == 'eliminar':
                 if str(ses['fila']['id']) == str(id_usuario):
                     raise mod_cuentas.ErrorCuenta('No puede eliminarse a sí mismo.')
-                c.eliminar(id_usuario, por=ses['usuario'],
-                           con_declaraciones=(campos.get('declaraciones') == 'eliminar'))
+                # Nunca con sus declaraciones: borrarlas devolvería el cupo que
+                # esa cuenta ya gastó. Se van a la cartera huérfanas y ahí siguen.
+                c.eliminar(id_usuario, por=ses['usuario'], con_declaraciones=False)
                 return self._ir('/admin/cuentas?ok=eliminada')
         except mod_cuentas.ErrorCuenta as ex:
             return self._ir(destino + '?err=' + urllib.parse.quote(str(ex)))
         self._error('Esa acción no existe.', 404)
-
-    def _eliminar_declaracion(self, ses, id_decl, campos):
-        borrada = ses['s'].eliminar_declaracion(id_decl)
-        if borrada:
-            persona = (borrada.get('contribuyentes') or {}).get('nombre_titulo', '—')
-            ses['cuentas'].anotar(
-                'declaracion_eliminada', ses['usuario'], rol=ses['rol'],
-                objeto=f"{persona} · AG{borrada.get('ano_gravable', '')}",
-                detalle=f"la había cargado {borrada.get('creada_por') or '—'}",
-                ip=self._ip())
-        volver = campos.get('volver', '/admin/declaraciones')
-        if not volver.startswith('/admin'):
-            volver = '/admin/declaraciones'
-        sep = '&' if '?' in volver else '?'
-        self._ir(f'{volver}{sep}ok=decl_eliminada')
 
     def log_message(self, fmt, *args):
         pass

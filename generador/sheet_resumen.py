@@ -220,7 +220,7 @@ def populate(wb, A, C, T):
     s.gap()
 
     # ── perfil del contribuyente ──
-    s.section('PERFIL DEL CONTRIBUYENTE  ·  MARQUE LA CASILLA Y COMPLETE EL DATO')
+    s.section('PERFIL DEL CONTRIBUYENTE  ·  RESPONDA SÍ O NO Y COMPLETE EL DATO')
     hr = s.r
     ws.row_dimensions[hr].height = 19.95
     for ci in range(2, 10):
@@ -229,13 +229,13 @@ def populate(wb, A, C, T):
         c.border = Border(top=S(BORD), left=S(BORD) if ci == 2 else None,
                           right=S(BORD) if ci == 9 else None)
     s.put(hr, 'B', 'Concepto', F(8.3, True, color=WHITE), AL('left', 'center', True, 1), None, 'D')
-    s.put(hr, 'E', 'Marque', F(8.3, True, color=WHITE), AL('center', 'center', True))
+    s.put(hr, 'E', 'Sí / No', F(8.3, True, color=WHITE), AL('center', 'center', True))
     s.put(hr, 'F', 'Detalle o cantidad', F(8.3, True, color=WHITE), AL('left', 'center', True, 1), None, 'G')
     s.put(hr, 'H', 'Dónde impacta', F(8.3, True, color=WHITE), AL('left', 'center', True, 1), None, 'I')
     s.r = hr + 1
 
-    chk = DataValidation(type='list', formula1='"✔,OK,—"', allow_blank=True, showDropDown=False)
-    chk.prompt = 'Marque con ✔ u OK si la respuesta es afirmativa.'
+    chk = DataValidation(type='list', formula1='"Sí,No"', allow_blank=True, showDropDown=False)
+    chk.prompt = 'Responda Sí o No. Déjela en blanco si todavía no lo ha confirmado con el contribuyente.'
     chk.promptTitle = 'Perfil del contribuyente'
     ws.add_data_validation(chk)
     fila_hijos = None
@@ -246,7 +246,7 @@ def populate(wb, A, C, T):
         box.fill = FILL(IN_FILL)
         box.border = Border(left=Side('medium', color=IN_BORD), right=Side('medium', color=IN_BORD),
                             top=Side('medium', color=IN_BORD), bottom=Side('medium', color=IN_BORD))
-        box.font = F(13.0, True, color=TEAL)
+        box.font = F(11.0, True, color=TEAL)
         box.alignment = AL('center', 'center')
         chk.add(box)
         for ci in (6, 7):
@@ -263,7 +263,7 @@ def populate(wb, A, C, T):
         ws.cell(row=fila_hijos, column=6).number_format = '0'
     r = s.datarow(h=26.0)
     s.put(r, 'B',
-          'Ninguno de estos datos llega por exógena: son la única fuente el contribuyente y sus soportes. Marque la casilla, escriba el detalle y cargue el valor en la hoja indicada — la liquidación no los toma de forma automática.',
+          'Ninguno de estos datos llega por exógena: son la única fuente el contribuyente y sus soportes. Responda Sí o No, escriba el detalle y cargue el valor en la hoja indicada — la liquidación no los toma de forma automática.',
           F(8.0, False, True, MUTED), AL('left', 'center', True, 2), None, 'I')
     s.gap(10.0)
 
