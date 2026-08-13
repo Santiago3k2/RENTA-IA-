@@ -51,10 +51,10 @@ create table if not exists declaraciones (
   libro_path        text,
   exogena_path      text,
 
-  -- Quién la cargó. Sostiene tres cosas a la vez: el cupo de esa cuenta, que
-  -- un usuario no sobrescriba el caso de otro, y —desde agosto de 2026— QUIÉN
-  -- PUEDE VERLA. Nadie ve una declaración que no cargó, salvo con permiso
-  -- concedido por su dueño (ver tabla permisos).
+  -- Quién la cargó. Sostiene tres cosas a la vez: el cupo de esa cuenta, CUÁL
+  -- es su copia del caso (ver la llave única de abajo) y —desde agosto de
+  -- 2026— QUIÉN PUEDE VERLA. Nadie ve una declaración que no cargó, salvo con
+  -- permiso concedido por su dueño (ver tabla permisos).
   -- 'admin' es el valor por defecto: lo dejan los casos que se suben desde el
   -- equipo de escritorio con sincronizar.py, que son del dueño del sistema.
   creada_por        text not null default 'admin',
@@ -62,7 +62,13 @@ create table if not exists declaraciones (
   creado_en         timestamptz not null default now(),
   actualizado_en    timestamptz not null default now(),
 
-  unique (contribuyente_id, ano_gravable)
+  -- La llave lleva el dueño dentro: **cada cuenta tiene su propia copia del
+  -- caso**. Dos personas pueden trabajar la misma declaración del mismo
+  -- contribuyente sin pisarse y sin enterarse la una de la otra, que es justo
+  -- lo que se quiere entre contadores que comparten el programa. Sin el dueño
+  -- aquí, la segunda carga chocaba contra la primera y había que decirle a
+  -- alguien que ese caso «ya lo hizo otro» —un dato que no le incumbe—.
+  unique (contribuyente_id, ano_gravable, creada_por)
 );
 
 create index if not exists idx_decl_contribuyente on declaraciones(contribuyente_id);
@@ -279,3 +285,10 @@ alter table borradores     enable row level security;
 --
 -- -- Y la cuenta técnica ya no hace falta.
 -- delete from usuarios where usuario = 'contador';
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Una copia del caso por cuenta — 13 de agosto de 2026
+--  Va en su propio archivo porque hay que correrlo tal cual sobre las bases
+--  que ya existen:  db\migracion-copia-por-cuenta.sql
+--  (Una base nueva no lo necesita: la llave de arriba ya lleva `creada_por`.)
+-- ═══════════════════════════════════════════════════════════════════════

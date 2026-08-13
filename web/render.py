@@ -834,9 +834,13 @@ def vista_confirmar(ref, C, calc, previa=None, cupo=None, token='', usuario='',
         f'<div class="cf"><div class="l">{k}</div><div class="v{cl}">{v}</div></div>'
         for k, v, cl in cifras)
 
-    # Reemplazo: el mismo contribuyente y el mismo año ya existen. No es un
+    # Reemplazo: **esta cuenta** ya cargó ese contribuyente y ese año. No es un
     # error —es reprocesar con el archivo corregido— y **no cuenta cupo otra
     # vez**, porque no se crea una fila nueva: se actualiza la que hay.
+    #
+    # Lo que hayan cargado otras cuentas no aparece aquí ni en ninguna otra
+    # parte: cada una tiene su propia copia del caso y ninguna sabe de las
+    # demás. `previa` solo puede ser lo suyo (ver `_previa_de` en api\index.py).
     aviso_previa = ''
     if previa:
         aviso_previa = (

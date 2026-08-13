@@ -39,6 +39,26 @@ class ErrorPermiso(ErrorSupabase):
     """El usuario no tiene derecho a hacer eso. No es una falla del sistema."""
 
 
+DUENO_POR_DEFECTO = 'admin'    # lo que sube sincronizar.py desde el escritorio
+
+
+def carpeta_dueno(usuario):
+    """El nombre de la cuenta, seguro como segmento de carpeta del Storage.
+
+    Cada cuenta guarda sus archivos en su propia subcarpeta: dos personas que
+    trabajen la misma declaración generan libros con el mismo nombre, y sin
+    esto el segundo pisaría el archivo del primero aunque cada uno tenga su
+    fila. Se filtra el nombre —aunque al crear la cuenta ya se valida— porque
+    una barra colada aquí escribiría en la carpeta de otro.
+    """
+    limpio = ''.join(c for c in str(usuario or '').lower()
+                     if c.isalnum() or c in '._-')
+    # Lo que queda en puros puntos ('.', '..') no es un nombre: es la carpeta
+    # de arriba. Un usuario válido nunca empieza por punto, pero esto es la
+    # última barrera antes de escribir en el Storage.
+    return limpio if limpio.strip('.-') else DUENO_POR_DEFECTO
+
+
 def _traducir(codigo, cuerpo, url):
     if codigo == 401:
         return ('Supabase rechazó la clave (401). Si la acaba de crear o rotar, '
@@ -53,6 +73,13 @@ def _traducir(codigo, cuerpo, url):
     if codigo == 404:
         return (f'Supabase respondió 404 en {url}. Verifique que el esquema esté '
                 'aplicado (db/esquema.sql) y que la URL del proyecto sea la correcta.')
+    if codigo == 409 and 'ano_gravable' in (cuerpo or ''):
+        # El único choque posible aquí es la llave única vieja, la que no lleva
+        # el dueño dentro. Sin este mensaje, el error crudo de Postgres deja al
+        # usuario adivinando —y, peor, delata que alguien más tiene ese caso—.
+        return ('Falta terminar de actualizar la base: corra una vez el archivo '
+                'db\\migracion-copia-por-cuenta.sql en el SQL Editor de Supabase. '
+                'Mientras tanto, este caso no se puede guardar.')
     return f'Supabase respondió {codigo}: {cuerpo[:300]}'
 
 
@@ -256,7 +283,7 @@ class Supabase:
     # ── el caso completo ────────────────────────────────────────────
     def guardar_caso(self, calc, libro=None, exogena=None, estado=None,
                      creada_por=None, libro_bytes=None, exogena_bytes=None,
-                     nombre_libro=None, nombre_exogena=None, solo_si_dueno=None):
+                     nombre_libro=None, nombre_exogena=None):
         """Persiste un caso ya calculado. Devuelve la fila de `declaraciones`.
 
         Los archivos entran por ruta (modo escritorio) o por bytes (funciones
@@ -264,8 +291,11 @@ class Supabase:
         del clasificador, no notas del contador. La revisión humana (estado,
         liberación) sí se conserva: solo se pisa si se pasa `estado`.
 
-        `creada_por` solo se escribe al crear: quien cargó el caso la primera
-        vez sigue siendo su dueño aunque después lo actualice el contador.
+        **Cada cuenta tiene su propia copia del caso.** La fila que se toca es
+        la de (contribuyente, año, `creada_por`), nunca la de otro: si dos
+        personas trabajan la misma declaración, cada una guarda la suya, ninguna
+        pisa a la otra y ninguna se entera de que la otra existe. Reprocesar lo
+        suyo actualiza su fila; nunca crea una segunda a su nombre.
         """
         C = calc['cliente']
         contribuyente = self.insertar('contribuyentes', {
@@ -294,25 +324,24 @@ class Supabase:
         if estado:
             fila['estado'] = estado
 
-        previa = self.seleccionar(
-            'declaraciones', select='id,creada_por',
+        # El dueño va SIEMPRE en la fila: es parte de la llave con la que se
+        # busca cuál actualizar. Sin él, dos cuentas terminarían peleándose la
+        # misma fila.
+        dueno = creada_por or DUENO_POR_DEFECTO
+        fila['creada_por'] = dueno
+        # La suya, si ya la tiene. Lo que hayan cargado otras cuentas del mismo
+        # contribuyente y año no se mira ni se toca: no es asunto de esta.
+        mias = self.seleccionar(
+            'declaraciones', select='id',
             contribuyente_id='eq.' + fila['contribuyente_id'],
-            ano_gravable='eq.' + fila['ano_gravable'])
-        if creada_por and not previa:
-            fila['creada_por'] = creada_por
-        # Un usuario restringido no puede pisar el caso de otro: el año gravable
-        # de un contribuyente es único, así que reprocesarlo sobrescribiría el
-        # trabajo del contador.
-        if solo_si_dueno and previa:
-            permitidos = ([solo_si_dueno] if isinstance(solo_si_dueno, str)
-                          else list(solo_si_dueno))
-            if previa[0].get('creada_por') not in permitidos:
-                raise ErrorPermiso(
-                    f'Esa declaración ({C["nombre_titulo"]} · AG {C["ano_gravable"]}) '
-                    'ya existe y la cargó otra persona. No se puede sobrescribir '
-                    'desde esta cuenta: pídale a su dueño que la revise.')
+            ano_gravable='eq.' + fila['ano_gravable'],
+            creada_por='eq.' + dueno)
 
-        carpeta = f"{fila['contribuyente_id']}/AG{fila['ano_gravable']}"
+        # Los archivos van bajo la carpeta de su dueño, para que el libro de una
+        # cuenta no sobrescriba el de otra: el nombre que genera el programa es
+        # el mismo para el mismo contribuyente.
+        carpeta = (f"{fila['contribuyente_id']}/AG{fila['ano_gravable']}"
+                   f"/{carpeta_dueno(dueno)}")
         if libro_bytes is not None:
             fila['libro_path'] = self.subir_bytes(
                 BUCKET_LIBROS, f'{carpeta}/{nombre_libro or "libro.xlsx"}', libro_bytes)
@@ -326,8 +355,13 @@ class Supabase:
             fila['exogena_path'] = self.subir(
                 BUCKET_EXOGENAS, f'{carpeta}/{os.path.basename(exogena)}', exogena)
 
-        decl = self.insertar('declaraciones', fila,
-                             conflicto='contribuyente_id,ano_gravable')[0]
+        # Actualizar la suya o crear una nueva, decidido en Python y no con un
+        # `on_conflict`: así el código funciona igual antes y después de correr
+        # db\migracion-copia-por-cuenta.sql, y no depende de cómo se llame la
+        # restricción en la base.
+        hechas = (self.actualizar('declaraciones', fila, id='eq.' + mias[0]['id'])
+                  if mias else None)
+        decl = hechas[0] if hechas else self.insertar('declaraciones', fila)[0]
 
         # Las alertas se rehacen enteras: son un derivado del clasificador, no
         # notas del contador. Pero **la revisión humana sí se conserva**: si el

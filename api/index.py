@@ -958,7 +958,7 @@ class handler(BaseHTTPRequestHandler):
                 s, ficha, liq, libro_bytes=rst_libro.a_bytes(wb),
                 nombre_libro=rst_generar.nombre_salida(ficha, liq),
                 consolidado_bytes=datos, nombre_consolidado=nombre,
-                creada_por=ses['usuario'], solo_si_dueno=ses['solo_de'])
+                creada_por=ses['usuario'])
             c.anotar('recibo_rst_creado', ses['usuario'], rol=ses['rol'],
                      objeto=f"recibo {recibo['id']}",
                      detalle=f"semáforo {liq['semaforo']}", ip=self._ip())
@@ -1162,11 +1162,18 @@ class handler(BaseHTTPRequestHandler):
 
     # ── carga en dos pasos ──────────────────────────────────────────
     def _previa_de(self, ses, C):
-        """Si ya existe ese (contribuyente, año), cuándo se cargó. Si no, None.
+        """Si ESTA cuenta ya cargó ese (contribuyente, año), cuándo. Si no, None.
 
         Sirve para avisar de que se va a reemplazar y —lo importante— para no
-        cobrar cupo por reprocesar algo que ya está: la clave única impide que
-        se cree una fila nueva, así que no hay nada que cobrar.
+        cobrar cupo por reprocesar algo que ya está: se actualiza la fila que
+        hay, no se crea otra, así que no hay nada que cobrar.
+
+        **Solo mira lo de esta cuenta, y es a propósito.** Cada cuenta tiene su
+        propia copia del caso: que otra persona haya trabajado el mismo
+        contribuyente y el mismo año no la afecta en nada, no le impide cargar
+        el suyo y —sobre todo— no se le dice, porque no es asunto suyo. Ni
+        siquiera la cartera prestada cuenta aquí: esa es otra fila, de otro
+        dueño, y reprocesar no la toca.
         """
         ident = str(C.get('identificacion', '')).replace('.', '').strip()
         if not ident:
@@ -1176,14 +1183,11 @@ class handler(BaseHTTPRequestHandler):
         if not personas:
             return None
         filas = ses['s'].seleccionar(
-            'declaraciones', select='id,creado_en,creada_por',
+            'declaraciones', select='id,creado_en',
             contribuyente_id='eq.' + personas[0]['id'],
-            ano_gravable='eq.' + str(C.get('ano_gravable', '')))
+            ano_gravable='eq.' + str(C.get('ano_gravable', '')),
+            creada_por='eq.' + ses['usuario'])
         if not filas:
-            return None
-        # De otro usuario no es «reemplazar»: es un caso que no le pertenece, y
-        # `guardar_caso` lo va a rechazar. Que no diga que no consume cupo.
-        if filas[0].get('creada_por') not in ses['solo_de']:
             return None
         return mod_cuentas.fecha_corta(filas[0].get('creado_en'))
 
@@ -1249,8 +1253,7 @@ class handler(BaseHTTPRequestHandler):
                                   libro_bytes=generar.a_bytes(C, T),
                                   nombre_libro=generar.nombre_libro(C),
                                   exogena_bytes=b.exogena(fila),
-                                  nombre_exogena=fila.get('nombre_exogena'),
-                                  solo_si_dueno=ses['solo_de'])
+                                  nombre_exogena=fila.get('nombre_exogena'))
         except db.ErrorPermiso as ex:
             return self._html(self._bandeja(ses, str(ex)), 403)
         b.borrar(fila)

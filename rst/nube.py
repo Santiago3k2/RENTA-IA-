@@ -89,12 +89,17 @@ def _liquidacion_serializable(liq):
 
 def guardar_recibo(s, ficha, liq, libro_bytes=None, nombre_libro=None,
                    consolidado_bytes=None, nombre_consolidado=None,
-                   creada_por=None, estado=None, solo_si_dueno=None):
+                   creada_por=None, estado=None):
     """Persiste un recibo ya liquidado. Devuelve la fila de `recibos_rst`.
 
     Reemplaza por completo las alertas: son un derivado del motor, no notas del
     contador. La revisión humana (estado, liberación) se conserva salvo que se
     pase `estado` explícitamente.
+
+    **Cada cuenta tiene su propia copia del recibo**, igual que en renta: la
+    fila que se toca es la de (contribuyente, año, bimestre, `creada_por`). Dos
+    personas pueden liquidar el mismo bimestre del mismo contribuyente sin
+    pisarse ni enterarse la una de la otra.
     """
     identificacion = str(ficha['nit']).replace('.', '').replace('-', '').strip()
     nombre = ficha['nombre']
@@ -120,20 +125,20 @@ def guardar_recibo(s, ficha, liq, libro_bytes=None, nombre_libro=None,
     if estado:
         fila['estado'] = estado
 
-    previa = s.seleccionar(TABLA, select='id,creada_por',
-                           contribuyente_id='eq.' + fila['contribuyente_id'],
-                           ano_gravable='eq.' + fila['ano_gravable'],
-                           bimestre='eq.%d' % fila['bimestre'])
-    if creada_por and not previa:
-        fila['creada_por'] = creada_por
-    if solo_si_dueno and previa and previa[0].get('creada_por') != solo_si_dueno:
-        raise ErrorPermiso(
-            'Ese recibo (%s · bimestre %d de %s) ya existe y lo cargó otra '
-            'persona. No se puede sobrescribir desde este usuario: pida al '
-            'contador que lo revise.' % (nombre, liq['bimestre'], liq['ano']))
+    # El dueño va siempre en la fila: es parte de la llave con la que se busca
+    # cuál actualizar. Solo se mira lo suyo; lo de otras cuentas ni se consulta.
+    dueno = creada_por or db_renta.DUENO_POR_DEFECTO
+    fila['creada_por'] = dueno
+    mios = s.seleccionar(TABLA, select='id',
+                         contribuyente_id='eq.' + fila['contribuyente_id'],
+                         ano_gravable='eq.' + fila['ano_gravable'],
+                         bimestre='eq.%d' % fila['bimestre'],
+                         creada_por='eq.' + dueno)
 
-    carpeta = '%s/RST-%s-B%d' % (fila['contribuyente_id'], fila['ano_gravable'],
-                                 fila['bimestre'])
+    # Bajo la carpeta de su dueño, para que el libro de una cuenta no pise el
+    # de otra: el nombre que genera el programa es el mismo para el mismo caso.
+    carpeta = '%s/RST-%s-B%d/%s' % (fila['contribuyente_id'], fila['ano_gravable'],
+                                    fila['bimestre'], db_renta.carpeta_dueno(dueno))
     if libro_bytes is not None:
         fila['libro_path'] = s.subir_bytes(
             BUCKET_LIBROS, '%s/%s' % (carpeta, nombre_libro or 'libro.xlsx'), libro_bytes)
@@ -143,8 +148,11 @@ def guardar_recibo(s, ficha, liq, libro_bytes=None, nombre_libro=None,
             '%s/%s' % (carpeta, nombre_consolidado or 'consolidado.xlsx'),
             consolidado_bytes)
 
-    recibo = s.insertar(TABLA, fila,
-                        conflicto='contribuyente_id,ano_gravable,bimestre')[0]
+    # Actualizar el suyo o crear uno nuevo, decidido aquí y no con un
+    # `on_conflict`: así funciona igual antes y después de correr
+    # db\migracion-copia-por-cuenta.sql.
+    hechos = s.actualizar(TABLA, fila, id='eq.' + mios[0]['id']) if mios else None
+    recibo = hechos[0] if hechos else s.insertar(TABLA, fila)[0]
 
     s.borrar(TABLA_ALERTAS, recibo_id='eq.' + recibo['id'])
     alertas = [{'recibo_id': recibo['id'], 'orden': i, 'prioridad': a['prioridad'],

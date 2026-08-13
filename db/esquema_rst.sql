@@ -67,14 +67,18 @@ create table if not exists recibos_rst (
   libro_path        text,
   consolidado_path  text,
 
-  -- Quién lo cargó: sostiene el cupo y, desde agosto de 2026, quién puede
-  -- verlo. Nadie ve un recibo que no cargó sin permiso de su dueño.
+  -- Quién lo cargó: sostiene el cupo, cuál es su copia del recibo y, desde
+  -- agosto de 2026, quién puede verlo. Nadie ve un recibo que no cargó sin
+  -- permiso de su dueño.
   creada_por        text not null default 'admin',
 
   creado_en         timestamptz not null default now(),
   actualizado_en    timestamptz not null default now(),
 
-  unique (contribuyente_id, ano_gravable, bimestre)
+  -- Con el dueño dentro, igual que en `declaraciones`: cada cuenta tiene su
+  -- propia copia del recibo y dos personas pueden liquidar el mismo bimestre
+  -- del mismo contribuyente sin pisarse ni enterarse la una de la otra.
+  unique (contribuyente_id, ano_gravable, bimestre, creada_por)
 );
 
 create index if not exists idx_rst_contribuyente on recibos_rst(contribuyente_id);
