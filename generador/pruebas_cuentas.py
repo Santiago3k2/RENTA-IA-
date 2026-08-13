@@ -174,10 +174,12 @@ def probar_estado(c, u, creada, clave):
                   'no se admite un cupo negativo')
 
     c.cambiar_cupo(creada['id'], 3, por='pruebas')
-    c.cambiar_rol(creada['id'], 'contador', por='pruebas')
+    c.cambiar_rol(creada['id'], 'admin', por='pruebas')
     revisar(c.buscar_id(creada['id'])['cupo'] is None,
-            'ascender a contador quita el cupo: ve toda la cartera')
+            'ascender a administrador quita el cupo: no procesa para terceros')
     c.cambiar_rol(creada['id'], 'cliente', por='pruebas')
+    revisar_error(lambda: c.cambiar_rol(creada['id'], 'contador', por='pruebas'),
+                  'no existe', 'el rol «contador» ya no se puede asignar')
 
     revisar(c.cuantas_lleva(u) == 0, 'una cuenta nueva no ha cargado declaraciones')
 

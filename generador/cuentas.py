@@ -49,13 +49,17 @@ ALGORITMO = 'pbkdf2_sha256'
 ITERACIONES = 600_000
 LARGO_SAL = 16
 
-ROLES = ('admin', 'contador', 'cliente')
+# Dos roles y no tres. El rol «contador» existía cuando se pensaba que el
+# contador era quien atendía a los usuarios del sitio; hoy el usuario del sitio
+# ES el contador, así que un tercer rol solo servía para confundir. Queda
+# `cliente` —el que trabaja— y `admin` —el que administra la plataforma y, por
+# decisión expresa, NO ve las declaraciones de nadie sin permiso concedido.
+ROLES = ('admin', 'cliente')
 ESTADOS = ('activo', 'pendiente', 'inhabilitado')
 
 ROL_ET = {
-    'admin':    ('Administrador', 'Ve todo y maneja las cuentas'),
-    'contador': ('Contador',      'Ve toda la cartera; no maneja cuentas'),
-    'cliente':  ('Cliente',       'Ve solo lo que él mismo carga, con cupo'),
+    'admin':   ('Administrador', 'Maneja las cuentas; no ve declaraciones ajenas'),
+    'cliente': ('Cliente',       'Ve solo lo que él mismo carga, con cupo'),
 }
 ESTADO_ET = {
     'activo':       'Activa',
@@ -437,7 +441,7 @@ class Cuentas:
         """
         if self.ajuste_bool('registro_abierto', True) is False:
             raise ErrorCuenta('El registro de cuentas nuevas está cerrado en este '
-                              'momento. Escriba al contador para pedir acceso.')
+                              'momento. Escriba al administrador para pedir acceso.')
         aprobar = self.ajuste_bool('requiere_aprobacion', False)
         problema = validar_correo(correo, obligatorio=True)
         if problema:
@@ -506,6 +510,58 @@ class Cuentas:
             self.poner_ajuste('migracion_heredados', '1', por='(migración)')
         return creadas
 
+    def migrar_rol_contador(self):
+        """Retira el rol «contador», que dejó de existir (ver ROLES).
+
+        Hace dos cosas, y la segunda es la que de verdad importa:
+
+        1. Las cuentas con ese rol pasan a «cliente» **conservando su cupo tal
+           como estaba** —lo tenían en None, o sea sin límite—, porque quitarles
+           el acceso ilimitado sería un cambio que nadie pidió.
+
+        2. Los casos que subió el equipo de escritorio quedaron a nombre de una
+           cuenta técnica llamada «contador». Ahora que **nadie ve lo que no
+           cargó**, esa cuenta inhabilitada los dejaría invisibles para todo el
+           mundo. Pasan a nombre del administrador, que es de quien son.
+
+        Corre una sola vez, como `migrar_heredados`: si el administrador después
+        le pone cupo a alguien, esto no puede deshacérselo en el próximo acceso.
+        """
+        if self.ajuste('migracion_roles'):
+            return []
+        migradas = []
+        try:
+            antiguos = self.s.seleccionar('usuarios', select='id,usuario,cupo',
+                                          rol='eq.contador')
+        except db.ErrorSupabase:
+            # La restricción de la base ya puede estar migrada y rechazar el
+            # valor en la consulta. Sin filas que arreglar, nada que hacer.
+            antiguos = []
+        try:
+            for fila in antiguos:
+                self.s.actualizar('usuarios', {'rol': 'cliente'},
+                                  id='eq.' + str(fila['id']))
+                migradas.append(fila['usuario'])
+                self.anotar('cuenta_rol', '(migración)', objeto=fila['usuario'],
+                            detalle='contador → cliente; el rol «contador» '
+                                    'desapareció y el cupo se conserva')
+            # El dueño de los casos del escritorio. Las tablas del RST pueden no
+            # existir en una base vieja, así que cada una va por su lado.
+            for tabla in ('declaraciones', 'recibos_rst'):
+                try:
+                    movidas = self.s.actualizar(tabla, {'creada_por': 'admin'},
+                                                creada_por='eq.contador')
+                    if movidas:
+                        self.anotar('migracion_dueno', '(migración)', objeto=tabla,
+                                    detalle=f'{len(movidas)} caso(s) del equipo de '
+                                            f'escritorio pasan a «admin»')
+                except db.ErrorSupabase:
+                    pass
+        except db.ErrorSupabase:
+            return migradas              # se reintenta en el próximo acceso
+        self.poner_ajuste('migracion_roles', '1', por='(migración)')
+        return migradas
+
     # ── acceso ──────────────────────────────────────────────────────
     def autenticar(self, usuario, clave, ip=None):
         """Devuelve (fila, None) si entra, o (None, 'motivo en español').
@@ -538,12 +594,12 @@ class Cuentas:
             self.anotar('acceso_denegado', u, rol=fila['rol'], ip=ip, exito=False,
                         detalle='cuenta pendiente de aprobación')
             return None, ('Su cuenta está creada pero todavía no ha sido aprobada. '
-                          'El contador la revisa y le avisa por correo.')
+                          'El administrador la revisa y le avisa por correo.')
         if fila['estado'] == 'inhabilitado':
             self.anotar('acceso_denegado', u, rol=fila['rol'], ip=ip, exito=False,
                         detalle='cuenta inhabilitada')
-            return None, ('Su cuenta está inhabilitada. Escriba al contador si '
-                          'cree que es un error.')
+            return None, ('Su cuenta está inhabilitada. Escriba al administrador '
+                          'si cree que es un error.')
 
         cambios = {'intentos_fallidos': 0, 'bloqueado_hasta': None,
                    'ultimo_acceso': iso()}
@@ -614,9 +670,10 @@ class Cuentas:
                 and not self.cuantos_admin(excepto=id_usuario)):
             raise ErrorCuenta('No puede quitarle el rol al único administrador activo. '
                               'Nombre otro administrador primero.')
-        # Un contador o un administrador ven toda la cartera: el cupo no aplica.
+        # El administrador no procesa declaraciones para clientes: no se le mide
+        # cupo. El cliente sí, y ese cupo es lo que se vende.
         cambios = {'rol': rol}
-        if rol in ('admin', 'contador'):
+        if rol == 'admin':
             cambios['cupo'] = None
         actualizada = self._actualizar(id_usuario, cambios)
         self.anotar('cuenta_rol', por, objeto=fila['usuario'],
@@ -737,10 +794,10 @@ class Cuentas:
     def eliminar(self, id_usuario, por=None, con_declaraciones=False):
         """Borra la cuenta. `con_declaraciones` decide qué pasa con sus casos.
 
-        Sin ese argumento las declaraciones se quedan y siguen viéndose en la
-        bandeja del contador: son papeles de trabajo de un contribuyente real,
-        no propiedad de quien las subió. Con él, se borran también sus archivos
-        del Storage — para eso está la pantalla de confirmación.
+        Sin ese argumento las declaraciones se quedan: son papeles de trabajo de
+        un contribuyente real, no propiedad de quien las subió. Con él, se
+        borran también sus archivos del Storage — para eso está la pantalla de
+        confirmación.
         """
         fila = self.buscar_id(id_usuario)
         if not fila:

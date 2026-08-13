@@ -10,6 +10,9 @@ plantilla/
 *.xlsx
 *.xls
 *.pdf
+# Los informes de trabajo citan casos y contribuyentes reales por su nombre, y
+# este repositorio es público. Se quedan en el equipo.
+*.docx
 
 # El datos.py de trabajo lleva datos de un contribuyente real.
 # En el repo solo viaja la plantilla anonimizada datos.ejemplo.py

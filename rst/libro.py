@@ -12,6 +12,8 @@ import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+import legal                    # el descargo, compartido con el motor de renta
+
 from . import parametros as P
 from . import plazos
 
@@ -780,6 +782,14 @@ def hoja_liquidacion(wb, liq, ficha, A):
     ws.merge_cells('B55:H55')
     _c(ws, 'B55', plazos.texto(liq['ano'], liq['bimestre'], ficha['nit'])
        + ' Se paga con el Formulario 490.', tam=9, ajuste=True)
+
+    # El descargo, al pie de la hoja que se imprime. El texto es el mismo que
+    # el usuario aceptó en la web antes de generar esto: vive en `legal.py`.
+    _seccion(ws, 57, 'DOCUMENTO DE TRABAJO — LÉASE ANTES DE PRESENTAR', 8)
+    ws.merge_cells('B58:H60')
+    _c(ws, 'B58', legal.LIBRO_RST, tam=9, ajuste=True, vert='top', borde=True)
+    for f in (58, 59, 60):
+        ws.row_dimensions[f].height = 24
     return ws
 
 

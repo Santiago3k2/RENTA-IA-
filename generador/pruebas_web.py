@@ -139,7 +139,7 @@ def probar_panel(nav):
         '/admin': 'PANEL DE ADMINISTRACIÓN',
         '/admin/cuentas': 'Cuentas registradas',
         '/admin/cuentas/nueva': 'Crear una cuenta',
-        '/admin/declaraciones': 'Todas las declaraciones',
+        '/admin/uso': 'Uso por cuenta',
         '/admin/bitacora': 'Bitácora',
         '/admin/ajustes': 'Registro de cuentas nuevas',
     }
@@ -216,8 +216,8 @@ def probar_expulsion(base, c, u, id_u, nav_admin):
     code, _, _ = cliente.post('/entrar', {'usuario': u, 'clave': CLAVE_CLIENTE})
     revisar(code == 303, 'el cliente entra')
     code, html, _ = cliente.get('/')
-    revisar(code == 200 and 'SUS DECLARACIONES' in html,
-            'el cliente ve solo lo suyo, no la cartera del contador')
+    revisar(code == 200 and 'NADIE MÁS VE ESTAS DECLARACIONES' in html,
+            'el cliente ve solo lo suyo, y la bandeja se lo dice')
     revisar('/admin' not in html, 'al cliente no se le ofrece el panel')
 
     code, _, _ = cliente.get('/admin/cuentas')
@@ -350,6 +350,121 @@ def probar_salida(nav):
             'después de salir, la bandeja vuelve a pedir la clave')
 
 
+
+def probar_privacidad(base, c, nav_admin, ua):
+    """Nadie ve lo que no cargó, ni el administrador — hasta que se lo concedan.
+
+    Es la regla de privacidad del producto y la más fácil de romper sin darse
+    cuenta: basta con que una consulta se olvide del filtro por dueño.
+    """
+    print('\nPrivacidad: la cartera ajena no se ve')
+    import permisos as mod_permisos
+    p = mod_permisos.Permisos(c.s)
+
+    # Un cliente con una declaración a su nombre. No se carga de verdad —eso
+    # cuesta segundos y una exógena— sino que se le cambia el dueño a una que
+    # ya exista; para lo que se mide da igual quién la generó.
+    ajenas = c.s.seleccionar('declaraciones', select='id,creada_por', limit='1')
+    if not ajenas:
+        print('  (no hay declaraciones en la base: se omite)')
+        return
+    ref, dueno = ajenas[0]['id'], ajenas[0]['creada_por']
+
+    code, html, _ = nav_admin.get('/caso/' + ref)
+    revisar(code == 404, 'sin permiso, el administrador no abre un caso ajeno',
+            f'dio {code}')
+    code, _, _ = nav_admin.get('/libro/' + ref)
+    revisar(code == 404, 'ni descarga su libro', f'dio {code}')
+
+    code, html, _ = nav_admin.get('/admin/uso')
+    revisar(code == 200 and 'Uso por cuenta' in html, 'el panel de uso carga')
+    revisar('nombre_titulo' not in html and 'Contribuyente</th>' not in html,
+            'el panel de uso no enseña ni un nombre de contribuyente')
+
+    # Se lo concede el dueño, y entonces sí.
+    p.conceder(dueno, ua, dias=1, por='pruebas')
+    code, _, _ = nav_admin.get('/caso/' + ref)
+    revisar(code == 200, 'con permiso vigente, el caso se abre', f'dio {code}')
+
+    # Un permiso vencido no vale: se fuerza la fecha hacia atrás.
+    fila = p.entre(dueno, ua)
+    c.s.actualizar('permisos', {'expira_en': '2020-01-01T00:00:00+00:00'},
+                   id='eq.' + str(fila['id']))
+    code, _, _ = nav_admin.get('/caso/' + ref)
+    revisar(code == 404, 'un permiso vencido deja de valer, sin que nadie lo apague',
+            f'dio {code}')
+
+    # Y revocarlo surte efecto en la petición siguiente.
+    p.conceder(dueno, ua, dias=1, por='pruebas')
+    code, _, _ = nav_admin.get('/caso/' + ref)
+    revisar(code == 200, 'concedido otra vez, vuelve a abrirse', f'dio {code}')
+    p.revocar(dueno, ua, por='pruebas')
+    code, _, _ = nav_admin.get('/caso/' + ref)
+    revisar(code == 404, 'revocar corta el acceso de inmediato', f'dio {code}')
+
+    # La bitácora no puede delatar a un contribuyente por la puerta de atrás.
+    code, html, _ = nav_admin.get('/admin/bitacora')
+    revisar(code == 200, 'la bitácora carga')
+    revisar('(reservado)' in html or 'declaración ' in html,
+            'la bitácora no muestra nombres de contribuyentes')
+
+
+def probar_descargo_y_cupo(base, c, nav_admin):
+    """El descargo es obligatorio y el cupo no se gasta por equivocarse."""
+    print('\nDescargo y cupo')
+    code, html, _ = nav_admin.get('/')
+    revisar('debo revisar la información antes de presentarla' in html
+            or 'documento de trabajo' in html.lower(),
+            'la bandeja lleva el descargo a la vista')
+
+    # Confirmar sin marcar la casilla no crea nada. Se prueba contra un
+    # borrador inventado: si el servidor mirara la casilla DESPUÉS de buscar
+    # el borrador, esto daría 404 en vez de negarse — y ese orden importa.
+    t = nav_admin.testigo(html)
+    inexistente = '00000000-0000-0000-0000-000000000000'
+    code, html2, _ = nav_admin.post('/confirmar/' + inexistente, {'_t': t})
+    revisar(code in (400, 404) and 'declaración' not in html2.split('<title>')[0],
+            'confirmar un borrador que no existe no crea nada', f'dio {code}')
+
+
+def probar_alertas(base, c, nav_admin, ua):
+    """Una alerta marcada como resuelta sobrevive a que el caso se reprocese."""
+    print('\nAlertas que se marcan como resueltas')
+    import permisos as mod_permisos
+    p = mod_permisos.Permisos(c.s)
+    filas = c.s.seleccionar('declaraciones', select='id,creada_por', limit='1')
+    if not filas:
+        print('  (no hay declaraciones en la base: se omite)')
+        return
+    ref, dueno = filas[0]['id'], filas[0]['creada_por']
+    alertas = c.s.alertas_de(ref)
+    if not alertas:
+        print('  (ese caso no tiene alertas: se omite)')
+        return
+
+    p.conceder(dueno, ua, dias=1, por='pruebas')
+    try:
+        a = alertas[0]
+        antes = bool(a.get('resuelta'))
+        c.s.marcar_alerta(a['id'], True, nota='resuelta en la prueba', por='pruebas')
+        vuelta = {x['id']: x for x in c.s.alertas_de(ref)}[a['id']]
+        revisar(vuelta['resuelta'] is True, 'la alerta queda marcada como resuelta')
+        revisar('pruebas' in (vuelta.get('nota_contador') or ''),
+                'la nota guarda quién la resolvió')
+        revisar(bool(vuelta.get('resuelta_en')), 'y cuándo')
+
+        code, html, _ = nav_admin.get('/caso/' + ref)
+        revisar(code == 200 and 'Dar por resuelta' in html or 'Reabrir' in html,
+                'la ficha del caso ofrece marcar las alertas')
+
+        c.s.marcar_alerta(a['id'], False, por='pruebas')
+        vuelta = {x['id']: x for x in c.s.alertas_de(ref)}[a['id']]
+        revisar(vuelta['resuelta'] is False, 'y se puede reabrir')
+        if antes:
+            c.s.marcar_alerta(a['id'], True, nota='(estado original)', por='pruebas')
+    finally:
+        p.revocar(dueno, ua, por='pruebas')
+
 def main():
     print('═' * 66)
     print('  RENTA IA — regresión del sitio publicado')
@@ -391,6 +506,9 @@ def main():
         probar_cierre_de_sesiones(base, c, u_cliente, id_cliente, nav)
         u_registrado = probar_registro_publico(base, c, nav)
         creados.append(u_registrado)
+        probar_privacidad(base, c, nav, ua)
+        probar_descargo_y_cupo(base, c, nav)
+        probar_alertas(base, c, nav, ua)
         probar_ultimo_admin(nav, c, admin_id)
         probar_eliminacion(nav, c, [u_cliente, u_registrado])
         probar_salida(nav)

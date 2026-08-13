@@ -98,9 +98,29 @@ un semáforo automático por caso:
    La lógica está en `generador\cuentas.py`, el HTML en `web\admin.py` y los
    permisos en `api\index.py` — esa separación es deliberada: si una vista
    empieza a decidir permisos, algo se coló donde no debía.
-5. **Portal del cliente** — el registro y la subida directa ya están; falta el
-   formulario de faltantes, las notificaciones por correo y la descarga de la
-   versión liberada como entregable distinto del papel de trabajo.
+4c. **Privacidad, descargo y carga en dos pasos** ✅ *(13-ago-2026)*
+   Tres decisiones de producto que cambiaron el modelo de permisos:
+   - **Un solo rol operativo.** Se retiró «contador»: quien usa el programa es
+     el contador. Quedan `admin` y `cliente`.
+   - **Nadie ve lo que no cargó, ni el administrador.** De la cartera ajena solo
+     se informa cuántos casos lleva cada cuenta. Para entrar hay que pedirle
+     permiso a su dueño, que lo concede por 24 h / 7 / 30 días y puede
+     revocarlo; el permiso vence solo (`generador\permisos.py`, tabla
+     `permisos`). La bitácora dejó de escribir nombres de contribuyentes.
+   - **La carga va en dos pasos** (`generador\borradores.py`, tabla
+     `borradores`): subir no crea nada ni gasta cupo; en la pantalla de
+     confirmación se ven las cifras, se responden las cinco preguntas que la
+     exógena no trae (`generador\perfil.py`) y se **acepta el descargo**
+     (`generador\legal.py`), que es obligatorio y queda anotado. Reprocesar un
+     caso propio no consume cupo nuevo: eso destraba a quien subió el archivo
+     equivocado sin reabrir el agujero de reciclar cupo borrando.
+   - Las **alertas se marcan como resueltas**, con nota, autor y fecha, y
+     sobreviven a que el caso se reprocese. Liberar exige que no queden ALTAS
+     abiertas, comprobado en el servidor.
+
+5. **Portal del cliente** — el registro, la subida y el formulario de faltantes
+   ya están; faltan las notificaciones por correo y la descarga de la versión
+   liberada como entregable distinto del papel de trabajo.
 
 ## Lo que nunca se automatiza
 

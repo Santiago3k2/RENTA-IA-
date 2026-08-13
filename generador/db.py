@@ -104,6 +104,28 @@ class Supabase:
         return (salida, recibidas) if con_cabeceras else salida
 
     # ── tablas ──────────────────────────────────────────────────────
+    @staticmethod
+    def filtro_dueno(solo_de):
+        """Filtro «solo los casos que cargaron estos usuarios».
+
+        Acepta un nombre suelto o una lista, porque desde agosto de 2026 un
+        usuario puede ver, además de lo suyo, la cartera de quien le concedió
+        permiso temporal.
+
+        `None` significa sin restricción. Una lista **vacía** no significa lo
+        mismo: significa «no ve nada», y se traduce a un filtro que no puede
+        casar con ninguna fila. Confundir las dos cosas abriría la cartera
+        entera al primer descuido.
+        """
+        if solo_de is None:
+            return None
+        if isinstance(solo_de, str):
+            return 'eq.' + solo_de
+        nombres = sorted({str(u) for u in solo_de if u})
+        if not nombres:
+            return 'in.("")'          # ningún usuario se llama así: no ve nada
+        return 'in.(' + ','.join('"%s"' % n.replace('"', '') for n in nombres) + ')'
+
     def seleccionar(self, tabla, **filtros):
         params = {'select': filtros.pop('select', '*')}
         orden = filtros.pop('order', None)
@@ -187,6 +209,23 @@ class Supabase:
         with open(ruta_local, 'rb') as f:
             return self.subir_bytes(bucket, ruta_destino, f.read(), tipo)
 
+    def descargar_bytes(self, bucket, ruta_destino):
+        """Baja un objeto del bucket. Devuelve bytes, o None si no está.
+
+        Hace falta desde que la carga va en dos pasos: la exógena se guarda en
+        un sitio provisional mientras el usuario revisa lo que salió, y al
+        confirmar hay que recuperarla para archivarla en su ruta definitiva.
+        """
+        destino = urllib.parse.quote(ruta_destino)
+        try:
+            salida = self._pedir('GET', f'/storage/v1/object/{bucket}/{destino}')
+        except ErrorSupabase:
+            return None
+        # `_pedir` intenta leer JSON y devuelve los bytes crudos cuando no lo es
+        # —que es siempre, tratándose de un .xlsx—. Un dict aquí significaría un
+        # error de Storage disfrazado de respuesta correcta.
+        return salida if isinstance(salida, (bytes, bytearray)) else None
+
     def url_firmada(self, bucket, ruta_destino, segundos=3600):
         """URL temporal de descarga. Vence sola: nunca se publica el bucket."""
         r = self._pedir('POST',
@@ -264,11 +303,14 @@ class Supabase:
         # Un usuario restringido no puede pisar el caso de otro: el año gravable
         # de un contribuyente es único, así que reprocesarlo sobrescribiría el
         # trabajo del contador.
-        if solo_si_dueno and previa and previa[0].get('creada_por') != solo_si_dueno:
-            raise ErrorPermiso(
-                f'Esa declaración ({C["nombre_titulo"]} · AG {C["ano_gravable"]}) '
-                'ya existe y la cargó otra persona. No se puede sobrescribir '
-                'desde este usuario: pida al contador que la revise.')
+        if solo_si_dueno and previa:
+            permitidos = ([solo_si_dueno] if isinstance(solo_si_dueno, str)
+                          else list(solo_si_dueno))
+            if previa[0].get('creada_por') not in permitidos:
+                raise ErrorPermiso(
+                    f'Esa declaración ({C["nombre_titulo"]} · AG {C["ano_gravable"]}) '
+                    'ya existe y la cargó otra persona. No se puede sobrescribir '
+                    'desde esta cuenta: pídale a su dueño que la revise.')
 
         carpeta = f"{fila['contribuyente_id']}/AG{fila['ano_gravable']}"
         if libro_bytes is not None:
@@ -287,13 +329,59 @@ class Supabase:
         decl = self.insertar('declaraciones', fila,
                              conflicto='contribuyente_id,ano_gravable')[0]
 
+        # Las alertas se rehacen enteras: son un derivado del clasificador, no
+        # notas del contador. Pero **la revisión humana sí se conserva**: si el
+        # contador ya dio por resuelta la alerta A3 y el caso se reprocesa con
+        # el archivo corregido, esa marca no puede desaparecer sin más. Se
+        # guardan por código antes de borrar y se reponen sobre las nuevas.
+        marcas = {}
+        for vieja in self.seleccionar('alertas',
+                                      select='codigo,resuelta,nota_contador,resuelta_en',
+                                      declaracion_id='eq.' + decl['id']):
+            if vieja.get('resuelta'):
+                marcas[vieja['codigo']] = vieja
         self.borrar('alertas', declaracion_id='eq.' + decl['id'])
-        alertas = [{'declaracion_id': decl['id'], 'codigo': a[0], 'severidad': a[1],
-                    'hallazgo': a[2], 'detalle': a[3], 'accion': a[4]}
-                   for a in C.get('alertas', [])]
+        alertas = []
+        for a in C.get('alertas', []):
+            nueva = {'declaracion_id': decl['id'], 'codigo': a[0], 'severidad': a[1],
+                     'hallazgo': a[2], 'detalle': a[3], 'accion': a[4]}
+            previa_marca = marcas.get(a[0])
+            if previa_marca:
+                nueva['resuelta'] = True
+                nueva['nota_contador'] = previa_marca.get('nota_contador')
+                nueva['resuelta_en'] = previa_marca.get('resuelta_en')
+            alertas.append(nueva)
         if alertas:
             self.insertar('alertas', alertas)
         return decl
+
+    def alertas_de(self, declaracion_id):
+        """Las alertas guardadas de un caso, con su marca de revisión."""
+        return self.seleccionar(
+            'alertas',
+            select='id,codigo,severidad,hallazgo,detalle,accion,resuelta,'
+                   'nota_contador,resuelta_en',
+            declaracion_id='eq.' + str(declaracion_id), order='id.asc')
+
+    def marcar_alerta(self, alerta_id, resuelta, nota=None, por=None):
+        """Da por resuelta una alerta, o le quita la marca.
+
+        La nota es lo que de verdad sirve dentro de tres meses: «resuelta» sin
+        el porqué no le dice nada a quien vuelva al caso —ni al propio contador
+        que la marcó—. Se guarda quién y cuándo junto al texto.
+        """
+        cambios = {'resuelta': bool(resuelta)}
+        if resuelta:
+            nota = (nota or '').strip()[:500]
+            firma = f'{por} · ' if por else ''
+            cambios['nota_contador'] = (firma + nota) if nota else (firma + 'sin nota')
+            cambios['resuelta_en'] = datetime.datetime.now(
+                datetime.timezone.utc).isoformat()
+        else:
+            cambios['nota_contador'] = None
+            cambios['resuelta_en'] = None
+        filas = self.actualizar('alertas', cambios, id='eq.' + str(alerta_id))
+        return filas[0] if filas else None
 
     def liberar(self, declaracion_id, por):
         """Marca el caso como liberado. Solo lo hace el contador, nunca el motor."""

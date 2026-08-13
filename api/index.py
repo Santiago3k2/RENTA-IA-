@@ -8,7 +8,8 @@ Diferencias con la versión de escritorio, todas por el entorno:
     que es efímero.
   · Todo pide usuario y contraseña. Aquí viajan declaraciones de personas
     reales, sujetas a la reserva del art. 583 E.T.
-  · Cada quien ve lo suyo: el cliente no ve la cartera del contador.
+  · Cada quien ve lo suyo, y el administrador tampoco: sin permiso concedido
+    por el dueño, no ve ni una declaración ajena.
 
 Este archivo decide **quién puede hacer qué**. Las reglas de las cuentas viven
 en `generador\cuentas.py` y el HTML en `web\`; aquí solo se enruta y se manda.
@@ -47,14 +48,19 @@ for sub in ('generador', 'web', ''):
 
 import admin as vista_admin
 import autogen
+import borradores as mod_borradores
 import calculos
 import clasificador
 import config
 import cuentas as mod_cuentas
 import db
+import generar
+import legal
 import login
 import multipart
 import nube
+import perfil as mod_perfil
+import permisos as mod_permisos
 import render
 import rst_vista
 from render import e
@@ -94,7 +100,7 @@ LIMITE_SUBIDA = 4 * 1024 * 1024      # lo que admite una función de Vercel
 # habilita a las demás cuentas. Se comprueba en el servidor, no solo ocultando
 # la pestaña: quien escriba la dirección a mano tampoco entra.
 NO_HAY_RST = ('El apartado del Régimen Simple todavía no está habilitado para su '
-              'cuenta. Escriba al contador si necesita acceso.')
+              'cuenta. Escriba al administrador si necesita acceso.')
 LIMITE_FORMULARIO = 16 * 1024        # ningún formulario de estos pesa más
 
 COOKIE = 'rentaia_sesion'
@@ -115,6 +121,15 @@ AVISOS = {
     'decl_estado': 'Estado de la declaración actualizado.',
     'ajustes': 'Ajustes guardados.',
     'clave': 'Su contraseña quedó cambiada.',
+    'permiso_dado': ('Acceso concedido. Vence solo, y usted puede retirarlo '
+                     'antes desde «Mi cuenta».'),
+    'permiso_negado': ('Solicitud rechazada. Sus declaraciones siguen siendo '
+                       'suyas y de nadie más.'),
+    'permiso_revocado': 'Acceso retirado. Surtió efecto de inmediato.',
+    'carga_cancelada': ('Carga descartada. No se creó ninguna declaración y no se '
+                        'consumió cupo.'),
+    'permiso_pedido': ('Se le pidió el acceso. Solo su dueño puede concederlo, '
+                       'y lo verá al entrar.'),
 }
 
 
@@ -317,7 +332,7 @@ class handler(BaseHTTPRequestHandler):
 
         if not fila or fila['estado'] != 'activo':
             # La cuenta se eliminó o se inhabilitó con la sesión abierta.
-            return self._expulsar('Su cuenta ya no tiene acceso. Consulte con el contador.')
+            return self._expulsar('Su cuenta ya no tiene acceso. Consulte con el administrador.')
         nacida = mod_cuentas.desde_iso(fila.get('sesiones_desde'))
         # La holgura de cinco segundos absorbe el desfase entre el reloj de la
         # base y el del servidor web. Sin ella, cerrar sesiones o cambiar la
@@ -325,12 +340,24 @@ class handler(BaseHTTPRequestHandler):
         if nacida and emitida < nacida.timestamp() - 5:
             return self._expulsar('Su sesión se cerró. Vuelva a entrar.')
 
+        # A quién ve. La regla es una sola y no tiene excepción por rol: **lo
+        # suyo, y la cartera de quien le haya concedido permiso vigente**. El
+        # administrador maneja cuentas y cupos, pero las declaraciones de sus
+        # usuarios son datos tributarios de terceros y no los ve por ser el
+        # dueño de la plataforma. Se recalcula en cada petición, igual que ya se
+        # relee la cuenta: así revocar un permiso surte efecto en el acto.
+        p = mod_permisos.Permisos(c.s)
+        try:
+            prestadas = p.vigentes_para(fila['usuario'])
+        except db.ErrorSupabase:
+            prestadas = []          # si la tabla no responde, ve solo lo suyo
         ses = {'usuario': fila['usuario'], 'rol': fila['rol'], 'fila': fila,
                'cuentas': c, 's': c.s, 'emitida': emitida,
                'testigo': testigo(fila['usuario'], emitida),
                'es_admin': fila['rol'] == 'admin',
-               've_todo': fila['rol'] in ('admin', 'contador'),
-               'solo_de': fila['usuario'] if fila['rol'] == 'cliente' else None,
+               'permisos': p,
+               'prestadas': prestadas,
+               'solo_de': [fila['usuario']] + prestadas,
                'cupo': fila['cupo']}
         if exigir_clave_al_dia and fila.get('debe_cambiar_clave'):
             # Ni una página más hasta que elija una contraseña que solo sepa él.
@@ -377,9 +404,15 @@ class handler(BaseHTTPRequestHandler):
                 return self._html(login.pagina_clave(
                     ses['usuario'], ses['testigo'], min_clave=mod_cuentas.MIN_CLAVE))
             if ruta == '/':
-                return self._html(self._bandeja(ses))
+                return self._html(self._bandeja(
+                    ses, hecho=AVISOS.get(self._consulta().get('ok', ''), '')))
             if ruta == '/cuenta':
                 return self._get_mi_cuenta(ses)
+            if ruta.startswith('/confirmar/'):
+                partes = ruta.split('/')
+                if len(partes) > 3 and partes[3] == 'cancelar':
+                    return self._cancelar_confirmar(ses, partes[2])
+                return self._get_confirmar(ses, partes[2])
             if ruta.startswith('/caso/'):
                 return self._get_caso(ses, ruta.split('/')[2])
             if ruta.startswith('/libro/'):
@@ -433,7 +466,7 @@ class handler(BaseHTTPRequestHandler):
         if not c.ajuste_bool('registro_abierto', True):
             return self._pantalla_acceso(
                 'El registro de cuentas nuevas está cerrado en este momento. '
-                'Escriba al contador para pedir acceso.', code=200)
+                'Escriba al administrador para pedir acceso.', code=200)
         self._html(login.pagina_registro(
             min_clave=mod_cuentas.MIN_CLAVE,
             aprobacion=c.ajuste_bool('requiere_aprobacion', False)))
@@ -441,6 +474,7 @@ class handler(BaseHTTPRequestHandler):
     def _get_mi_cuenta(self, ses):
         c = ses['cuentas']
         datos = {'usadas': c.cuantas_lleva(ses['usuario']),
+                 'accesos': ses['permisos'].concedidos_de(ses['usuario']),
                  'movimientos': c.bitacora(limite=15, usuario=ses['usuario'])}
         aviso = AVISOS.get(self._consulta().get('ok', ''), '')
         self._html(vista_admin.vista_mi_cuenta(ses['fila'], datos, ses['testigo'],
@@ -457,41 +491,68 @@ class handler(BaseHTTPRequestHandler):
                                      usuario=ses['usuario'], pie=render.PIE_NUBE,
                                      mostrar_estado=True, nav=self._nav(ses),
                                      rol=vista_admin.ROL_NOMBRE.get(ses['rol'], ''),
-                                     acciones=acciones,
-                                     estilo_extra=vista_admin.ESTILO if acciones else ''))
+                                     acciones=acciones, token=ses['testigo'],
+                                     puede_marcar=True,
+                                     estilo_extra=vista_admin.ESTILO))
+
+    @staticmethod
+    def _altas_abiertas(caso):
+        """Alertas ALTA que nadie ha dado por resueltas."""
+        return [a for a in (caso.get('alertas') or [])
+                if isinstance(a, dict) and a.get('severidad') == 'ALTA'
+                and not a.get('resuelta')]
 
     def _acciones_caso(self, ses, caso):
-        """Los botones del pie del caso: mover el estado y, si procede, borrar."""
-        bloques = []
-        if ses['ve_todo']:
-            botones = []
-            for valor, texto in (('borrador', 'Devolver a borrador'),
-                                 ('en_revision', 'Marcar en revisión'),
-                                 ('liberada', 'Liberar')):
-                if valor == caso.get('estado'):
-                    continue
+        """Los botones del pie del caso: mover el estado de la revisión.
+
+        Los ve quien ve el caso. Ya no hay un rol «que revisa» distinto del que
+        trabaja: quien usa el sistema es el contador, y libera lo suyo.
+        """
+        abiertas = self._altas_abiertas(caso)
+        botones = []
+        for valor, texto in (('borrador', 'Devolver a borrador'),
+                             ('en_revision', 'Marcar en revisión'),
+                             ('liberada', 'Liberar')):
+            if valor == caso.get('estado'):
+                continue
+            if valor == 'liberada' and abiertas:
+                # No se oculta el botón: se deshabilita y se dice por qué.
+                # Ocultarlo dejaría al usuario buscando qué hizo mal.
                 botones.append(
-                    f'<form method="post" action="/caso/{e(caso["ref"])}/estado">'
-                    f'<input type="hidden" name="_t" value="{e(ses["testigo"])}">'
-                    f'<input type="hidden" name="estado" value="{valor}">'
-                    f'<button class="mini sec" type="submit">{e(texto)}</button></form>')
-            bloques.append(
-                '<div class="seccion" style="margin-top:22px"><h2>Revisión</h2>'
-                '<div class="cuerpo"><p>Liberar deja constancia de que usted revisó '
-                'este caso y lo da por bueno. Es una marca de trabajo, no un envío '
-                'a la DIAN.</p><div class="acc-fila" style="justify-content:flex-start">'
-                + ''.join(botones) + '</div></div></div>')
+                    f'<button class="mini sec" type="button" disabled '
+                    f'title="Resuelva primero las {len(abiertas)} alerta(s) ALTA">'
+                    f'{e(texto)}</button>')
+                continue
+            botones.append(
+                f'<form method="post" action="/caso/{e(caso["ref"])}/estado">'
+                f'<input type="hidden" name="_t" value="{e(ses["testigo"])}">'
+                f'<input type="hidden" name="estado" value="{valor}">'
+                f'<button class="mini sec" type="submit">{e(texto)}</button></form>')
+        traba = ''
+        if abiertas:
+            traba = (f'<p style="margin-top:12px;color:{render.ROJO}"><b>No se puede '
+                     f'liberar todavía:</b> quedan {len(abiertas)} alerta(s) de '
+                     f'severidad ALTA sin resolver. Márquelas arriba, una por una, '
+                     f'anotando cómo las resolvió — o corrija lo que haya que '
+                     f'corregir y vuelva a cargar el archivo.</p>')
         # Una declaración no se elimina desde ninguna parte. El cupo es lo que
         # se vende: si borrar devolviera el cupo, una cuenta de cupo 1 podría
         # procesar sin límite subiendo, borrando y volviendo a subir.
-        return ''.join(bloques)
+        return ('<div class="seccion" style="margin-top:22px"><h2>Revisión</h2>'
+                '<div class="cuerpo"><p>Liberar deja constancia de que usted revisó '
+                'este caso y lo da por bueno. Es una marca de trabajo, no un envío '
+                'a la DIAN.</p><div class="acc-fila" style="justify-content:flex-start">'
+                + ''.join(botones) + '</div>' + traba + '</div></div>')
 
     def _get_libro(self, ses, ref):
         caso = nube.buscar(ref, ses['s'], solo_de=ses['solo_de'])
         if not caso or not caso.get('libro_path'):
             return self._error('Ese libro no existe o no es suyo.', 404)
+        # En la bitácora NO va el nombre del contribuyente: la lee el
+        # administrador, y él no tiene por qué saber a quién le llevan la
+        # contabilidad sus usuarios. La referencia del caso basta para auditar.
         ses['cuentas'].anotar('libro_descargado', ses['usuario'], rol=ses['rol'],
-                              objeto=f"{caso['persona']} · {caso['ano']}", ip=self._ip())
+                              objeto=f"declaración {ref}", ip=self._ip())
         # URL firmada de vigencia corta: el bucket nunca se hace público.
         url = ses['s'].url_firmada(db.BUCKET_LIBROS, caso['libro_path'], 120)
         self.send_response(302)
@@ -521,8 +582,13 @@ class handler(BaseHTTPRequestHandler):
                 ses['usuario'], ses['testigo'], error=err))
 
         if ruta == '/admin/declaraciones':
-            return self._html(vista_admin.vista_declaraciones(
-                self._declaraciones(ses), ses['usuario'], ses['testigo'], err, ok))
+            return self._ir('/admin/uso')      # se llamaba así antes
+
+        if ruta == '/admin/uso':
+            renta, rst = self._uso_por_cuenta(ses)
+            return self._html(vista_admin.vista_uso(
+                c.listar(), renta, rst, ses['permisos'].vigentes_para(ses['usuario']),
+                ses['usuario'], ses['testigo'], err, ok))
 
         if ruta == '/admin/bitacora':
             try:
@@ -554,8 +620,10 @@ class handler(BaseHTTPRequestHandler):
             if len(partes) == 4 and partes[3] == 'eliminar':
                 return self._html(vista_admin.vista_confirmar_cuenta(
                     u, c.cuantas_lleva(u['usuario']), ses['usuario'], ses['testigo']))
+            # De la cartera de esta cuenta se le dice al administrador cuántos
+            # casos lleva, y nada más. Para entrar tiene que pedir permiso.
             datos = {'usadas': c.cuantas_lleva(u['usuario']),
-                     'declaraciones': self._declaraciones(ses, de=u['usuario'])}
+                     'permiso': ses['permisos'].entre(u['usuario'], ses['usuario'])}
             return self._html(vista_admin.vista_cuenta(
                 u, datos, ses['usuario'], ses['testigo'], err, ok))
 
@@ -592,34 +660,97 @@ class handler(BaseHTTPRequestHandler):
             usadas[d['creada_por']] = usadas.get(d['creada_por'], 0) + 1
         return usadas
 
-    def _declaraciones(self, ses, de=None):
-        filtros = {'select': 'id,ano_gravable,estado,semaforo,creada_por,creado_en,'
-                             'libro_path,exogena_path,'
-                             'contribuyentes(nombre_titulo,identificacion)',
-                   'order': 'creado_en.desc'}
-        if de:
-            filtros['creada_por'] = 'eq.' + de
-        filas = ses['s'].seleccionar('declaraciones', **filtros)
-        registrados = {u['usuario'] for u in ses['cuentas'].listar()}
-        for f in filas:
-            f['dueno_existe'] = f.get('creada_por') in registrados
-        return filas
+    def _uso_por_cuenta(self, ses):
+        """Cuántos casos lleva cada cuenta. Ni un dato del contribuyente.
+
+        Es **todo** lo que el administrador puede saber de la cartera ajena: el
+        número. Ni el nombre, ni la cédula, ni el año, ni el semáforo, ni las
+        cifras. Para ver una declaración tiene que pedirle permiso a su dueño.
+        Se piden solo las columnas `creada_por` a propósito: lo que no se trae
+        no se puede filtrar mal más adelante.
+        """
+        renta, rst = {}, {}
+        for d in ses['s'].seleccionar('declaraciones', select='creada_por'):
+            renta[d['creada_por']] = renta.get(d['creada_por'], 0) + 1
+        try:
+            for r in ses['s'].seleccionar('recibos_rst', select='creada_por'):
+                rst[r['creada_por']] = rst.get(r['creada_por'], 0) + 1
+        except db.ErrorSupabase:
+            pass                          # base todavía sin el módulo RST
+        return renta, rst
 
     def _bandeja(self, ses, error='', hecho=''):
         c = ses['cuentas']
         lista = nube.listar(ses['s'], solo_de=ses['solo_de'])
         cupo = c.cupo_de(ses['fila'])
-        if ses['ve_todo']:
-            sub = ('BANDEJA DEL CONTADOR &nbsp;&middot;&nbsp; CADA CASO SE VALIDA '
-                   'CONTRA LOS TOPES DE LA DIAN')
+        # El filtro viaja en la dirección: así el enlace de una cifra del
+        # encabezado se puede compartir, marcar y recargar sin perderlo.
+        consulta = self._consulta()
+        sem = consulta.get('sem', '')
+        sem = sem if sem in ('VERDE', 'AMARILLO', 'ROJO') else ''
+        estado = consulta.get('estado', '')
+        estado = estado if estado in ('borrador', 'en_revision', 'liberada') else ''
+        orden = consulta.get('orden', 'nombre')
+        orden = orden if orden in dict(render.ORDENES) else 'nombre'
+        if ses['prestadas']:
+            quienes = ', '.join(ses['prestadas'])
+            sub = ('SU CARTERA &nbsp;&middot;&nbsp; Y LA DE ' +
+                   e(quienes.upper()) + ', CON PERMISO VIGENTE')
         else:
-            sub = ('SUS DECLARACIONES &nbsp;&middot;&nbsp; USTED VE ÚNICAMENTE LAS '
-                   'QUE HA CARGADO')
+            sub = ('SU CARTERA &nbsp;&middot;&nbsp; NADIE MÁS VE ESTAS '
+                   'DECLARACIONES SIN SU PERMISO')
         return render.vista_bandeja(
             lista, error=error, hecho=hecho, usuario=ses['usuario'], cupo=cupo,
             pie=render.PIE_NUBE, mostrar_estado=True, sub=sub, nav=self._nav(ses),
             rol=vista_admin.ROL_NOMBRE.get(ses['rol'], ''), token=ses['testigo'],
-            aviso=c.ajuste('mensaje_portada', '') or '')
+            aviso=c.ajuste('mensaje_portada', '') or '',
+            solicitudes=self._solicitudes_html(ses),
+            sem=sem, estado=estado, orden=orden)
+
+    def _solicitudes_html(self, ses):
+        """La franja de «alguien pide entrar a sus declaraciones».
+
+        Sale arriba de la bandeja, sin poder ignorarse, porque es una decisión
+        sobre datos de terceros que solo el dueño puede tomar. Las duraciones
+        son cortas a propósito: un acceso a declaraciones ajenas no debería
+        concederse «para siempre» y olvidarse.
+        """
+        try:
+            pendientes = ses['permisos'].pendientes_de(ses['usuario'])
+        except db.ErrorSupabase:
+            return ''
+        if not pendientes:
+            return ''
+        bloques = []
+        for p in pendientes:
+            quien = ses['cuentas'].buscar(p['solicitante'])
+            nombre = (quien or {}).get('nombre') or p['solicitante']
+            motivo = (p.get('motivo') or '').strip()
+            botones = ''.join(
+                f'<button class="mini sec" type="submit" name="dias" value="{d}">'
+                f'{e(et)}</button>'
+                for d, et in mod_permisos.DURACIONES)
+            bloques.append(f"""<div class="peticion">
+  <div class="peticion-txt">
+    <b>{e(nombre)}</b> (<span class="mono-t">{e(p['solicitante'])}</span>)
+    pide entrar a sus declaraciones.
+    {('<br><i>«' + e(motivo) + '»</i>') if motivo else
+     '<br><span class="pista">No escribió un motivo.</span>'}
+  </div>
+  <form method="post" action="/permiso/{e(p['solicitante'])}/conceder" class="peticion-acc">
+    <input type="hidden" name="_t" value="{e(ses['testigo'])}">
+    <span class="pista">Dar acceso por:</span>{botones}
+  </form>
+  <form method="post" action="/permiso/{e(p['solicitante'])}/denegar">
+    <input type="hidden" name="_t" value="{e(ses['testigo'])}">
+    <button class="mini peligro" type="submit">No dar acceso</button>
+  </form>
+</div>""")
+        return ('<div class="peticiones"><h2>Alguien pide ver sus declaraciones'
+                '</h2><p class="pista">Mientras no lo conceda, nadie más que '
+                'usted las ve. Puede retirar el acceso cuando quiera desde '
+                '<a href="/cuenta">Mi cuenta</a>.</p>'
+                + ''.join(bloques) + '</div>')
 
     # ══ Apartado RST — Régimen Simple ═══════════════════════════════
     # Tablas propias (`recibos_rst`), porque la clave del caso es
@@ -646,41 +777,44 @@ class handler(BaseHTTPRequestHandler):
             estilo_extra=vista_admin.ESTILO + rst_vista.ESTILO))
 
     def _acciones_rst(self, ses, caso):
-        if ses['ve_todo']:
-            botones = []
-            for valor, texto in (('borrador', 'Devolver a borrador'),
-                                 ('en_revision', 'Marcar en revisión'),
-                                 ('liberada', 'Liberar')):
-                if valor == caso.get('estado'):
-                    continue
-                botones.append(
-                    f'<form method="post" action="/rst/{e(caso["ref"])}/estado">'
-                    f'<input type="hidden" name="_t" value="{e(ses["testigo"])}">'
-                    f'<input type="hidden" name="estado" value="{valor}">'
-                    f'<button class="mini sec" type="submit">{e(texto)}</button></form>')
-            return ('<div class="seccion" style="margin-top:22px"><h2>Revisión</h2>'
+        """Los botones del pie del recibo. Los ve quien ve el recibo."""
+        botones = []
+        for valor, texto in (('borrador', 'Devolver a borrador'),
+                             ('en_revision', 'Marcar en revisión'),
+                             ('liberada', 'Liberar')):
+            if valor == caso.get('estado'):
+                continue
+            botones.append(
+                f'<form method="post" action="/rst/{e(caso["ref"])}/estado">'
+                f'<input type="hidden" name="_t" value="{e(ses["testigo"])}">'
+                f'<input type="hidden" name="estado" value="{valor}">'
+                f'<button class="mini sec" type="submit">{e(texto)}</button></form>')
+        bloques = [('<div class="seccion" style="margin-top:22px"><h2>Revisión</h2>'
                     '<div class="cuerpo"><p>Liberar deja constancia de que usted revisó '
                     'este recibo y lo da por bueno. Es una marca de trabajo, no una '
                     'presentación ante la DIAN.</p>'
                     '<div class="acc-fila" style="justify-content:flex-start">'
-                    + ''.join(botones) + '</div></div></div>')
+                    + ''.join(botones) + '</div></div></div>')]
         if caso.get('estado') == 'borrador' and caso.get('creada_por') == ses['usuario']:
-            return (f'<div class="seccion" style="margin-top:22px">'
-                    f'<h2>¿Se equivocó de archivo?</h2><div class="cuerpo">'
-                    f'<p>Puede eliminar este recibo mientras siga en borrador. Se borran '
-                    f'su libro y el consolidado que subió, y recupera el cupo.</p>'
-                    f'<form method="get" action="/rst/{e(caso["ref"])}/eliminar">'
-                    f'<button class="mini peligro" type="submit">Eliminar este recibo'
-                    f'</button></form></div></div>')
-        return ''
+            bloques.append(
+                f'<div class="seccion" style="margin-top:22px">'
+                f'<h2>¿Se equivocó de archivo?</h2><div class="cuerpo">'
+                f'<p>Puede eliminar este recibo mientras siga en borrador. Se borran '
+                f'su libro y el consolidado que subió, y recupera el cupo.</p>'
+                f'<form method="get" action="/rst/{e(caso["ref"])}/eliminar">'
+                f'<button class="mini peligro" type="submit">Eliminar este recibo'
+                f'</button></form></div></div>')
+        return ''.join(bloques)
 
     def _get_libro_rst(self, ses, ref):
         caso = rst_nube.buscar(ses['s'], ref, solo_de=ses['solo_de'])
         if not caso or not caso['fila'].get('libro_path'):
             return self._error('Ese libro no existe o no es suyo.', 404)
+        # En la bitácora NO va el nombre del contribuyente: la lee el
+        # administrador, y él no tiene por qué saber a quién le llevan la
+        # contabilidad sus usuarios. La referencia basta para auditar.
         ses['cuentas'].anotar('libro_rst_descargado', ses['usuario'], rol=ses['rol'],
-                              objeto=f"{caso['persona']} · {caso['periodo']}",
-                              ip=self._ip())
+                              objeto=f"recibo {ref}", ip=self._ip())
         url = ses['s'].url_firmada(db.BUCKET_LIBROS, caso['fila']['libro_path'], 120)
         self.send_response(302)
         self.send_header('Location', url)
@@ -691,14 +825,13 @@ class handler(BaseHTTPRequestHandler):
         caso = rst_nube.buscar(ses['s'], ref, solo_de=ses['solo_de'])
         if not caso:
             return self._error('Ese recibo no existe o no es suyo.', 404)
-        if not ses['ve_todo'] and (caso.get('estado') != 'borrador'
-                                   or caso.get('creada_por') != ses['usuario']):
+        if (caso.get('estado') != 'borrador'
+                or caso.get('creada_por') != ses['usuario']):
             return self._error('Solo puede eliminar un recibo suyo que siga en '
                                'borrador.', 403)
         rst_nube.eliminar(ses['s'], ref)
         ses['cuentas'].anotar('recibo_rst_eliminado', ses['usuario'], rol=ses['rol'],
-                              objeto=f"{caso['persona']} · {caso['periodo']}",
-                              ip=self._ip())
+                              objeto=f"recibo {ref}", ip=self._ip())
         self._ir('/rst')
 
     def _ficha_desde_formulario(self, crudo):
@@ -781,7 +914,7 @@ class handler(BaseHTTPRequestHandler):
                 if usadas >= ses['cupo']:
                     return self._html(self._bandeja_rst(
                         ses, f'Su cupo está completo: {usadas} de {ses["cupo"]}. '
-                             f'Para ampliarlo, escriba al contador.'), 403)
+                             f'Para ampliarlo, escriba al administrador.'), 403)
 
             largo = int(self.headers.get('Content-Length') or 0)
             if largo <= 0:
@@ -798,6 +931,11 @@ class handler(BaseHTTPRequestHandler):
                                        ses['testigo']):
                 return self._error('La página caducó. Vuelva al apartado RST y '
                                    'reintente la carga.', 400)
+
+            # El descargo se comprueba aquí, en el servidor, y no ocultando el
+            # botón: es la diferencia entre una cortesía y una condición.
+            if not multipart.extraer_campo(crudo, legal.NOMBRE_CAMPO):
+                return self._html(self._bandeja_rst(ses, legal.NO_ACEPTADO), 400)
 
             ficha = self._ficha_desde_formulario(crudo)
             nombre, datos = multipart.extraer_archivo(
@@ -822,8 +960,11 @@ class handler(BaseHTTPRequestHandler):
                 consolidado_bytes=datos, nombre_consolidado=nombre,
                 creada_por=ses['usuario'], solo_si_dueno=ses['solo_de'])
             c.anotar('recibo_rst_creado', ses['usuario'], rol=ses['rol'],
-                     objeto=f"{ficha['nombre']} · {liq['ano']} bim {liq['bimestre']}",
+                     objeto=f"recibo {recibo['id']}",
                      detalle=f"semáforo {liq['semaforo']}", ip=self._ip())
+            c.anotar('descargo_aceptado', ses['usuario'], rol=ses['rol'],
+                     objeto=f"recibo {recibo['id']}",
+                     detalle='aceptó revisar antes de presentar', ip=self._ip())
             self._ir('/rst/' + recibo['id'])
         except db.ErrorPermiso as ex:
             self._html(self._bandeja_rst(ses, str(ex)), 403)
@@ -842,8 +983,6 @@ class handler(BaseHTTPRequestHandler):
         accion = partes[3] if len(partes) > 3 else ''
         if accion != 'estado':
             return self._error('Esa acción no existe.', 404)
-        if not ses['ve_todo']:
-            return self._error('Solo el contador mueve el estado de un recibo.', 403)
         estado = (campos or {}).get('estado', '')
         if estado not in ('borrador', 'en_revision', 'liberada'):
             return self._error('Estado desconocido.', 400)
@@ -883,6 +1022,10 @@ class handler(BaseHTTPRequestHandler):
                 return self._post_recibo_rst(ses, ruta.split('/'), campos)
             if ruta == '/cuenta/clave':
                 return self._post_mi_clave(ses, campos)
+            if ruta.startswith('/confirmar/'):
+                return self._post_confirmar(ses, ruta.split('/')[2], campos)
+            if ruta.startswith('/permiso/'):
+                return self._post_permiso(ses, ruta.split('/'), campos)
             if ruta.startswith('/caso/'):
                 return self._post_caso(ses, ruta.split('/'), campos)
             if ruta.startswith('/admin'):
@@ -917,6 +1060,9 @@ class handler(BaseHTTPRequestHandler):
                 PILOTO: {'clave': env('RENTA_IA_CLAVE_PILOTO'), 'rol': 'cliente',
                          'nombre': 'Usuario de prueba', 'cupo': _cupo_piloto()},
             })
+            # Las cuentas que quedaron con el rol «contador», que ya no existe,
+            # pasan a «cliente» conservando su cupo. También una sola vez.
+            c.migrar_rol_contador()
             # Y este es el seguro permanente contra quedarse fuera: si la tabla
             # se queda sin ningún administrador, se recrea el de arranque.
             c.asegurar_admin(ADMIN, env('RENTA_IA_CLAVE_ADMIN'))
@@ -981,8 +1127,144 @@ class handler(BaseHTTPRequestHandler):
     def _mi_cuenta_con(self, ses, error):
         c = ses['cuentas']
         datos = {'usadas': c.cuantas_lleva(ses['usuario']),
+                 'accesos': ses['permisos'].concedidos_de(ses['usuario']),
                  'movimientos': c.bitacora(limite=15, usuario=ses['usuario'])}
         return vista_admin.vista_mi_cuenta(ses['fila'], datos, ses['testigo'], error)
+
+    def _post_permiso(self, ses, partes, campos):
+        """POST /permiso/<otro>/<conceder|denegar|revocar>.
+
+        Siempre lo ejecuta **el dueño de las declaraciones** sobre su propia
+        cartera: `ses['usuario']` es quien decide y el de la URL es el que pide.
+        Un administrador no puede llamar a esto para concederse acceso a sí
+        mismo — la fila que se toca es la de (dueño=quien pide la página).
+        """
+        otro = mod_cuentas.normalizar(urllib.parse.unquote(partes[2] if len(partes) > 2 else ''))
+        accion = partes[3] if len(partes) > 3 else ''
+        p = ses['permisos']
+        try:
+            if accion == 'conceder':
+                dias = int((campos or {}).get('dias') or 0)
+                p.conceder(ses['usuario'], otro, dias=dias, por=ses['usuario'],
+                           ip=self._ip())
+                destino = '/?ok=permiso_dado'
+            elif accion == 'denegar':
+                p.denegar(ses['usuario'], otro, por=ses['usuario'], ip=self._ip())
+                destino = '/?ok=permiso_negado'
+            elif accion == 'revocar':
+                p.revocar(ses['usuario'], otro, por=ses['usuario'], ip=self._ip())
+                destino = '/cuenta?ok=permiso_revocado'
+            else:
+                return self._error('Esa acción no existe.', 404)
+        except mod_permisos.ErrorPermiso as ex:
+            return self._error(str(ex), 400)
+        self._ir(destino)
+
+    # ── carga en dos pasos ──────────────────────────────────────────
+    def _previa_de(self, ses, C):
+        """Si ya existe ese (contribuyente, año), cuándo se cargó. Si no, None.
+
+        Sirve para avisar de que se va a reemplazar y —lo importante— para no
+        cobrar cupo por reprocesar algo que ya está: la clave única impide que
+        se cree una fila nueva, así que no hay nada que cobrar.
+        """
+        ident = str(C.get('identificacion', '')).replace('.', '').strip()
+        if not ident:
+            return None
+        personas = ses['s'].seleccionar('contribuyentes', select='id',
+                                        identificacion='eq.' + ident)
+        if not personas:
+            return None
+        filas = ses['s'].seleccionar(
+            'declaraciones', select='id,creado_en,creada_por',
+            contribuyente_id='eq.' + personas[0]['id'],
+            ano_gravable='eq.' + str(C.get('ano_gravable', '')))
+        if not filas:
+            return None
+        # De otro usuario no es «reemplazar»: es un caso que no le pertenece, y
+        # `guardar_caso` lo va a rechazar. Que no diga que no consume cupo.
+        if filas[0].get('creada_por') not in ses['solo_de']:
+            return None
+        return mod_cuentas.fecha_corta(filas[0].get('creado_en'))
+
+    def _get_confirmar(self, ses, ref, error='', valores=None):
+        b = mod_borradores.Borradores(ses['s'])
+        fila = b.buscar(ref, ses['usuario'])
+        if not fila:
+            return self._html(self._bandeja(
+                ses, 'Esa carga ya no está disponible: se canceló o pasaron las dos '
+                     'horas que dura sin confirmar. Vuelva a subir el archivo — no '
+                     'se consumió cupo.'), 404)
+        C, T = fila['cliente'], fila['textos']
+        calc = calculos.calcular_dict(C, T)
+        self._html(render.vista_confirmar(
+            ref, C, calc, previa=self._previa_de(ses, C),
+            cupo=ses['cuentas'].cupo_de(ses['fila']), token=ses['testigo'],
+            usuario=ses['usuario'], pie=render.PIE_NUBE, nav=self._nav(ses),
+            rol=vista_admin.ROL_NOMBRE.get(ses['rol'], ''), error=error,
+            valores=valores), 200 if not error else 400)
+
+    def _cancelar_confirmar(self, ses, ref):
+        b = mod_borradores.Borradores(ses['s'])
+        b.borrar(b.buscar(ref, ses['usuario']))
+        self._ir('/?ok=carga_cancelada')
+
+    def _post_confirmar(self, ses, ref, campos):
+        """Paso 2 de 2: aquí sí se crea la declaración y se cuenta el cupo."""
+        s, c = ses['s'], ses['cuentas']
+        b = mod_borradores.Borradores(s)
+        fila = b.buscar(ref, ses['usuario'])
+        if not fila:
+            return self._html(self._bandeja(
+                ses, 'Esa carga ya no está disponible: se canceló o venció. Vuelva '
+                     'a subir el archivo — no se consumió cupo.'), 404)
+
+        C, T = fila['cliente'], fila['textos']
+        # El descargo, antes que nada y en el servidor. Sin él no se genera.
+        if not legal.aceptado(campos):
+            return self._get_confirmar(ses, ref, legal.NO_ACEPTADO, campos)
+
+        previa = self._previa_de(ses, C)
+        # El cupo solo se mira si esto crea una declaración nueva. Reemplazar
+        # una suya no crea fila, así que no puede consumir lo que no gasta —y
+        # es lo que destraba a quien subió el archivo equivocado.
+        if ses['cupo'] is not None and not previa:
+            usadas = c.cuantas_lleva(ses['usuario'])
+            if usadas >= ses['cupo']:
+                return self._html(self._bandeja(
+                    ses, f'Su cupo está completo: {usadas} de {ses["cupo"]} '
+                         f'declaraciones. Para ampliarlo, escriba al administrador.'), 403)
+
+        C['perfil'] = mod_perfil.desde_formulario(campos)
+        # Lo que quedó sin responder no tumba el caso —el semáforo mide si la
+        # clasificación cuadra, no si el contribuyente contestó el teléfono—
+        # pero sí queda escrito en la hoja de alertas y en la ficha del caso.
+        falta = mod_perfil.alerta(C['perfil'],
+                                  codigo='P%d' % (len(C.get('alertas') or []) + 1))
+        if falta:
+            C['alertas'] = list(C.get('alertas') or []) + [falta]
+        try:
+            calc = calculos.calcular_dict(C, T)
+            decl = s.guardar_caso(calc, creada_por=ses['usuario'],
+                                  libro_bytes=generar.a_bytes(C, T),
+                                  nombre_libro=generar.nombre_libro(C),
+                                  exogena_bytes=b.exogena(fila),
+                                  nombre_exogena=fila.get('nombre_exogena'),
+                                  solo_si_dueno=ses['solo_de'])
+        except db.ErrorPermiso as ex:
+            return self._html(self._bandeja(ses, str(ex)), 403)
+        b.borrar(fila)
+        c.anotar('declaracion_creada', ses['usuario'], rol=ses['rol'],
+                 objeto=f"declaración {decl['id']}",
+                 detalle=f"semáforo {calc['semaforo']}"
+                         + (' · reemplaza la anterior' if previa else ''),
+                 ip=self._ip())
+        # La aceptación del descargo se anota aparte y con su propio nombre:
+        # es lo que convierte el aviso en un respaldo con fecha y usuario.
+        c.anotar('descargo_aceptado', ses['usuario'], rol=ses['rol'],
+                 objeto=f"declaración {decl['id']}",
+                 detalle='aceptó revisar antes de presentar', ip=self._ip())
+        self._ir('/caso/' + decl['id'])
 
     def _post_caso(self, ses, partes, campos):
         ref = partes[2]
@@ -992,14 +1274,40 @@ class handler(BaseHTTPRequestHandler):
             return self._error('Ese caso no existe o no es suyo.', 404)
 
         if accion == 'estado':
-            if not ses['ve_todo']:
-                return self._error('Solo el contador cambia el estado de un caso.', 403)
+            # Quien ve el caso lo mueve: ya no hay un rol «que revisa» aparte
+            # del que trabaja. `nube.buscar` con `solo_de` ya negó el acceso a
+            # quien no debía llegar hasta aquí.
             estado = campos.get('estado', '')
+            # Liberar con alertas ALTA abiertas se niega en el SERVIDOR, no
+            # solo deshabilitando el botón: quien arme el POST a mano tampoco.
+            abiertas = self._altas_abiertas(caso)
+            if estado == 'liberada' and abiertas:
+                return self._error(
+                    f'No se puede liberar: quedan {len(abiertas)} alerta(s) de '
+                    f'severidad ALTA sin resolver. Márquelas como resueltas en la '
+                    f'ficha del caso, anotando cómo las resolvió.', 400)
             ses['s'].cambiar_estado(ref, estado, por=ses['usuario'])
             ses['cuentas'].anotar('declaracion_estado', ses['usuario'], rol=ses['rol'],
-                                  objeto=f"{caso['persona']} · {caso['ano']}",
+                                  objeto=f"declaración {ref}",
                                   detalle=f'→ {estado}', ip=self._ip())
             return self._ir(f'/caso/{ref}')
+
+        if accion == 'alerta':
+            # La alerta tiene que ser de ESTE caso. Sin comprobarlo, el id de
+            # una alerta cualquiera permitiría tocar la de un caso ajeno con
+            # solo cambiar el número en el formulario.
+            id_alerta = str(campos.get('alerta', ''))
+            propias = {str(a['id']) for a in ses['s'].alertas_de(ref)}
+            if id_alerta not in propias:
+                return self._error('Esa alerta no es de este caso.', 400)
+            resuelta = campos.get('resuelta') == '1'
+            ses['s'].marcar_alerta(id_alerta, resuelta,
+                                   nota=campos.get('nota', ''), por=ses['usuario'])
+            ses['cuentas'].anotar(
+                'alerta_resuelta' if resuelta else 'alerta_reabierta',
+                ses['usuario'], rol=ses['rol'], objeto=f'declaración {ref}',
+                detalle=f'alerta {id_alerta}', ip=self._ip())
+            return self._ir(f'/caso/{ref}#alertas')
 
         if accion == 'eliminar':
             return self._error('Las declaraciones de renta no se eliminan: una vez '
@@ -1008,23 +1316,27 @@ class handler(BaseHTTPRequestHandler):
         self._error('Esa acción no existe.', 404)
 
     def _post_subir(self, ses):
-        """Recibe la exógena, la procesa en memoria y guarda el caso."""
+        """Paso 1 de 2: lee y clasifica la exógena. **No crea nada todavía.**
+
+        Aquí no se toca el cupo ni se guarda declaración: el resultado queda en
+        un borrador que vence en dos horas y el usuario decide en la pantalla
+        siguiente. Equivocarse de archivo dejó de costar un cupo.
+
+        **El cupo no se comprueba aquí, y es a propósito.** Hasta no leer el
+        archivo no se sabe de quién es ni de qué año, así que tampoco se sabe si
+        va a crear una declaración nueva —que cuesta cupo— o a reemplazar una
+        suya —que no—. Negar la carga por adelantado dejaría atascado justo al
+        que subió el archivo equivocado, que es a quien esto viene a destrabar.
+        La comprobación va en el paso 2, cuando ya se sabe cuál de las dos es.
+        """
         s, c = ses['s'], ses['cuentas']
         try:
-            if ses['cupo'] is not None:
-                usadas = c.cuantas_lleva(ses['usuario'])
-                if usadas >= ses['cupo']:
-                    return self._html(self._bandeja(
-                        ses, f'Su cupo está completo: {usadas} de {ses["cupo"]} '
-                             f'declaraciones. Puede seguir consultando las que ya '
-                             f'cargó; para ampliarlo, escriba al contador.'), 403)
-
             largo = int(self.headers.get('Content-Length') or 0)
             if largo <= 0:
                 raise ValueError('El envío llegó vacío.')
             if largo > LIMITE_SUBIDA:
                 raise ValueError('El archivo supera los 4 MB que admite el servidor. '
-                                 'Procéselo desde el equipo del contador.')
+                                 'Procéselo desde el programa instalado en su equipo.')
             crudo = self.rfile.read(largo)
 
             # El testigo viaja como campo del formulario multipart; se comprueba
@@ -1053,17 +1365,13 @@ class handler(BaseHTTPRequestHandler):
                 except OSError:
                     pass
 
-            calc = calculos.calcular_dict(res['cliente'], res['textos'])
-            decl = s.guardar_caso(calc, creada_por=ses['usuario'],
-                                  libro_bytes=res['libro_bytes'],
-                                  nombre_libro=res['nombre_libro'],
-                                  exogena_bytes=datos, nombre_exogena=nombre,
-                                  solo_si_dueno=ses['solo_de'])
-            c.anotar('declaracion_creada', ses['usuario'], rol=ses['rol'],
-                     objeto=f"{calc['cliente']['nombre_titulo']} · "
-                            f"AG{calc['cliente']['ano_gravable']}",
-                     detalle=f"semáforo {calc['semaforo']}", ip=self._ip())
-            self._ir('/caso/' + decl['id'])
+            # El libro NO se arma aquí: se armará al confirmar, ya con las
+            # respuestas del perfil dentro. Armarlo dos veces sería tirar dos
+            # segundos de función por cada carga que se cancela.
+            borrador = mod_borradores.Borradores(s).crear(
+                ses['usuario'], res['cliente'], res['textos'],
+                exogena_bytes=datos, nombre_exogena=nombre)
+            self._ir('/confirmar/' + borrador['id'])
         except db.ErrorPermiso as ex:
             self._html(self._bandeja(ses, str(ex)), 403)
         except db.ErrorSupabase as ex:
@@ -1128,7 +1436,7 @@ class handler(BaseHTTPRequestHandler):
         if provisional:
             # Se muestra sin redirigir: la contraseña no puede viajar en la URL,
             # donde quedaría en el historial y en los registros del proxy.
-            datos = {'usadas': 0, 'declaraciones': []}
+            datos = {'usadas': 0, 'permiso': None}
             return self._html(vista_admin.vista_cuenta(
                 nueva, datos, ses['usuario'], ses['testigo'],
                 hecho='Cuenta creada.', clave_nueva=clave))
@@ -1150,6 +1458,20 @@ class handler(BaseHTTPRequestHandler):
                 c.cambiar_rol(id_usuario, campos.get('rol', ''), por=ses['usuario'])
                 return self._ir(destino + '?ok=rol')
 
+            if accion == 'permiso':
+                # El administrador PIDE; no se concede nada aquí. Conceder es
+                # del dueño y solo del dueño, desde su propia bandeja.
+                otra = c.buscar_id(id_usuario)
+                if not otra:
+                    raise mod_cuentas.ErrorCuenta('Esa cuenta ya no existe.')
+                try:
+                    ses['permisos'].pedir(otra['usuario'], ses['usuario'],
+                                          motivo=campos.get('motivo', ''),
+                                          por=ses['usuario'], ip=self._ip())
+                except mod_permisos.ErrorPermiso as ex:
+                    return self._ir(destino + '?err=' + urllib.parse.quote(str(ex)))
+                return self._ir(destino + '?ok=permiso_pedido')
+
             if accion == 'cupo':
                 cupo = None
                 if not campos.get('sin_limite'):
@@ -1170,7 +1492,7 @@ class handler(BaseHTTPRequestHandler):
                 nueva = c.restablecer_clave(id_usuario, por=ses['usuario'])
                 u = c.buscar_id(id_usuario)
                 datos = {'usadas': c.cuantas_lleva(u['usuario']),
-                         'declaraciones': self._declaraciones(ses, de=u['usuario'])}
+                         'permiso': ses['permisos'].entre(u['usuario'], ses['usuario'])}
                 return self._html(vista_admin.vista_cuenta(
                     u, datos, ses['usuario'], ses['testigo'], clave_nueva=nueva))
 

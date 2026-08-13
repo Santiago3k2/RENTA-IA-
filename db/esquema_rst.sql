@@ -67,7 +67,9 @@ create table if not exists recibos_rst (
   libro_path        text,
   consolidado_path  text,
 
-  creada_por        text not null default 'contador',
+  -- Quién lo cargó: sostiene el cupo y, desde agosto de 2026, quién puede
+  -- verlo. Nadie ve un recibo que no cargó sin permiso de su dueño.
+  creada_por        text not null default 'admin',
 
   creado_en         timestamptz not null default now(),
   actualizado_en    timestamptz not null default now(),

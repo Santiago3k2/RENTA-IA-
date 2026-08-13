@@ -9,27 +9,19 @@ from openpyxl.formatting.rule import FormulaRule
 from openpyxl.worksheet.datavalidation import DataValidation
 from build_lib import *
 
+import legal
+import perfil as perfil_mod
 import plazos
 
 AUT = 'Generador renta'
 
-TEXTO_DOC_TRABAJO = ('Liquidación propuesta elaborada sobre información exógena; no es un formulario oficial '
-                     'de la DIAN ni una declaración presentada. La exógena no reemplaza la realidad económica '
-                     'del contribuyente: antes de diligenciar el formulario deben incorporarse los soportes '
-                     'propios —las casillas de fondo crema de cada hoja están para eso— y resolverse las '
-                     'partidas de la hoja «7. Alertas».')
+# El descargo vive en `legal.py`, que es su única definición: la web muestra el
+# mismo texto y hace que se acepte antes de generar este libro.
+TEXTO_DOC_TRABAJO = legal.LIBRO
 
-PERFIL = [
-    ('¿Es casado o vive en unión permanente?', 'Nombre e identificación del cónyuge',
-     'El cónyuge en situación de dependencia cuenta como dependiente — art. 387 par. 2 E.T.'),
-    ('¿Tiene hijos? ¿Cuántos?', 'Número de hijos', None),
-    ('¿Tiene crédito hipotecario de vivienda?', 'Entidad e intereses pagados en el año',
-     'Los intereses son deducibles hasta 1.200 UVT al año — art. 119 E.T.'),
-    ('¿Tiene crédito educativo (ICETEX u otro)?', 'Entidad e intereses pagados en el año',
-     'Los intereses de préstamos del ICETEX son deducibles hasta 100 UVT — art. 119 E.T.'),
-    ('¿Tiene residencia fiscal en Colombia?', 'Días de permanencia en el país durante el año',
-     'Define si tributa sobre renta de fuente mundial y presenta el formulario 210 — art. 10 E.T.'),
-]
+# Las preguntas viven en `perfil.py`, que es su única definición: de ahí salen
+# también las del formulario de la web, que ahora las hace ANTES de generar.
+PERFIL = perfil_mod.PREGUNTAS
 
 
 def populate(wb, A, C, T):
@@ -238,22 +230,35 @@ def populate(wb, A, C, T):
     chk.prompt = 'Responda Sí o No. Déjela en blanco si todavía no lo ha confirmado con el contribuyente.'
     chk.promptTitle = 'Perfil del contribuyente'
     ws.add_data_validation(chk)
+    # Lo que el usuario ya respondió en la web al confirmar la carga. Las
+    # casillas siguen siendo editables y de fondo crema: se rellenan, no se
+    # cierran — el contador manda sobre lo que dijo el formulario.
+    respuestas = C.get('perfil') or {}
     fila_hijos = None
-    for i, (concepto, detalle, efecto) in enumerate(PERFIL):
+    for i, (clave, concepto, detalle, efecto) in enumerate(PERFIL):
         r = s.datarow(zebra=bool(i % 2), h=27.0)
         s.put(r, 'B', concepto, F(9.2, color=TEXT), AL('left', 'center', True, 1), None, 'D')
+        dada = respuestas.get(clave) or {}
         box = ws.cell(row=r, column=5)
         box.fill = FILL(IN_FILL)
         box.border = Border(left=Side('medium', color=IN_BORD), right=Side('medium', color=IN_BORD),
                             top=Side('medium', color=IN_BORD), bottom=Side('medium', color=IN_BORD))
         box.font = F(11.0, True, color=TEAL)
         box.alignment = AL('center', 'center')
+        box.value = dada.get('respuesta') or None
         chk.add(box)
         for ci in (6, 7):
             cc = ws.cell(row=r, column=ci)
             cc.fill = FILL(IN_FILL)
             cc.border = Border(left=S(IN_BORD), right=S(IN_BORD), top=S(IN_BORD), bottom=S(IN_BORD))
-        s.put(r, 'F', None, F(9.0, color=TEXT), AL('left', 'center', True, 1), None, 'G')
+        texto_detalle = dada.get('detalle') or None
+        if texto_detalle and clave in perfil_mod.NUMERICAS:
+            try:
+                texto_detalle = int(float(str(texto_detalle).replace(',', '.')))
+            except (TypeError, ValueError):
+                pass
+        s.put(r, 'F', texto_detalle, F(9.0, color=TEXT),
+              AL('left', 'center', True, 1), None, 'G')
         if efecto is None:
             fila_hijos = r
             efecto = (f'="Deducción potencial: "&TEXT(MIN(N(F{r}),4)*72*$G$9,"$ #.##0")'
@@ -262,8 +267,14 @@ def populate(wb, A, C, T):
     if fila_hijos:
         ws.cell(row=fila_hijos, column=6).number_format = '0'
     r = s.datarow(h=26.0)
-    s.put(r, 'B',
-          'Ninguno de estos datos llega por exógena: son la única fuente el contribuyente y sus soportes. Responda Sí o No, escriba el detalle y cargue el valor en la hoja indicada — la liquidación no los toma de forma automática.',
+    faltan = perfil_mod.sin_responder(respuestas)
+    if not respuestas:
+        pie_perfil = ('Ninguno de estos datos llega por exógena: son la única fuente el contribuyente y sus soportes. Responda Sí o No, escriba el detalle y cargue el valor en la hoja indicada — la liquidación no los toma de forma automática.')
+    elif faltan:
+        pie_perfil = (f'Lo respondido en la web ya viene diligenciado; las casillas siguen abiertas y usted manda sobre ellas. Quedan {len(faltan)} pregunta(s) sin responder: confírmelas con el contribuyente. La liquidación no toma estos datos de forma automática — cargue el valor en la hoja indicada.')
+    else:
+        pie_perfil = ('Las cinco respuestas vienen de lo que se diligenció en la web al generar este libro. Las casillas siguen abiertas: si el contribuyente corrige algo, corríjalo aquí. La liquidación no toma estos datos de forma automática — cargue el valor en la hoja indicada.')
+    s.put(r, 'B', pie_perfil,
           F(8.0, False, True, MUTED), AL('left', 'center', True, 2), None, 'I')
     s.gap(10.0)
 

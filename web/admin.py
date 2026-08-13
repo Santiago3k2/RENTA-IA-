@@ -20,14 +20,15 @@ Dos criterios de forma que valen para todo el panel:
     números, qué se va a perder. Nada de ventanitas del navegador.
 """
 import cuentas
+import permisos
 import render
 from render import e
 
 VERDE, AMBAR, ROJO, AZUL, GRIS = (render.VERDE, render.AMBAR, render.ROJO,
                                   render.AZUL, render.GRIS)
 
-ROL_COLOR = {'admin': ROJO, 'contador': AZUL, 'cliente': GRIS}
-ROL_NOMBRE = {'admin': 'Administrador', 'contador': 'Contador', 'cliente': 'Cliente'}
+ROL_COLOR = {'admin': ROJO, 'cliente': GRIS}
+ROL_NOMBRE = {'admin': 'Administrador', 'cliente': 'Cliente'}
 ESTADO_COLOR = {'activo': VERDE, 'pendiente': AMBAR, 'inhabilitado': GRIS}
 ESTADO_NOMBRE = {'activo': 'Activa', 'pendiente': 'Pendiente', 'inhabilitado': 'Inhabilitada'}
 
@@ -56,14 +57,34 @@ ACCION_ET = {
     'declaracion_eliminada': ('Declaración eliminada', 'mal'),
     'declaracion_estado': ('Estado de la declaración', ''),
     'libro_descargado': ('Libro descargado', ''),
+    'libro_rst_descargado': ('Libro RST descargado', ''),
+    'recibo_rst_creado': ('Recibo RST cargado', ''),
+    'recibo_rst_eliminado': ('Recibo RST eliminado', 'mal'),
+    'descargo_aceptado': ('Aceptó el descargo', ''),
+    'permiso_pedido': ('Pidió acceso a una cartera', ''),
+    'permiso_concedido': ('Concedió acceso a su cartera', ''),
+    'permiso_denegado': ('Negó el acceso a su cartera', ''),
+    'permiso_revocado': ('Retiró el acceso a su cartera', 'mal'),
+    'migracion_dueno': ('Cambio de dueño (migración)', ''),
     'ajuste': ('Ajuste del sistema', ''),
+}
+
+# Acciones cuyo «objeto» puede delatar a un contribuyente. Hoy ya no se escribe
+# ahí ningún nombre —solo la referencia del caso—, pero la bitácora es un
+# registro histórico y las filas de antes de agosto de 2026 sí lo llevan. Se
+# tapan al mostrarlas: lo que se guardó no se puede desguardar, pero sí se
+# puede dejar de enseñar.
+ACCIONES_RESERVADAS = {
+    'declaracion_creada', 'declaracion_eliminada', 'declaracion_estado',
+    'libro_descargado', 'libro_rst_descargado', 'recibo_rst_creado',
+    'recibo_rst_eliminado', 'descargo_aceptado',
 }
 
 ESTILO = """
 /* ── PANEL ── */
 .tarjetas{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
 gap:14px;margin-bottom:26px}
-.tj{background:#fff;border:1px solid var(--bord);border-radius:12px;padding:16px 18px;
+.tj{background:var(--sup);border:1px solid var(--bord);border-radius:12px;padding:16px 18px;
 box-shadow:var(--sombra)}
 .tj .n{font-size:27px;font-weight:600;letter-spacing:-.03em;line-height:1.1;
 font-variant-numeric:tabular-nums}
@@ -73,7 +94,7 @@ margin-top:5px;font-weight:600}
 .tj.v .n{color:var(--verde)}.tj.a .n{color:var(--ambar)}.tj.r .n{color:var(--rojo)}
 .tj a{color:var(--z500);font-size:11.5px}
 
-.seccion{background:#fff;border:1px solid var(--bord);border-radius:12px;
+.seccion{background:var(--sup);border:1px solid var(--bord);border-radius:12px;
 margin-bottom:18px;box-shadow:var(--sombra);overflow:hidden}
 .seccion > h2{font-size:15px;padding:15px 20px;border-bottom:1px solid var(--bord);
 display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -103,18 +124,8 @@ text-transform:uppercase;font-weight:600;margin-top:2px}
 .cupo-cel .b i{display:block;height:100%;background:var(--tinta)}
 .cupo-cel .b i.lleno{background:var(--rojo)}
 
-/* botones pequeños dentro de las tablas y fichas */
-.acc-fila{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
-.acc-fila form{display:inline}
-button.mini,a.mini{margin-top:0;padding:6px 11px;font-size:12px;border-radius:7px;
-font-weight:500;display:inline-block;text-decoration:none;line-height:1.35;
-font-family:inherit;border:1px solid transparent;cursor:pointer}
-button.sec,a.mini.sec{background:#fff;color:var(--ink);border-color:var(--bord-2)}
-button.sec:hover,a.mini.sec:hover{background:var(--z100);border-color:var(--z400)}
-button.peligro{background:#fff;color:var(--rojo);border-color:var(--rojo-b)}
-button.peligro:hover{background:var(--rojo-f);border-color:var(--rojo)}
-button.peligro.firme{background:var(--rojo);color:#fff;border-color:var(--rojo)}
-button.peligro.firme:hover{background:#93231A}
+/* Los botones pequeños viven en `render.ESTILO`: los usa también la bandeja,
+   desde que la franja de solicitudes de acceso salió del panel. */
 
 /* formularios del panel */
 .rejilla{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;
@@ -127,7 +138,7 @@ align-items:start}
 .campo input[type=text],.campo input[type=email],.campo input[type=password],
 .campo input[type=number],.campo select,.campo textarea{
 width:100%;border:1px solid var(--bord);border-radius:8px;padding:9px 12px;font-size:13.5px;
-font-family:inherit;background:#fff;color:var(--ink);box-shadow:var(--sombra);
+font-family:inherit;background:var(--sup);color:var(--ink);box-shadow:var(--sombra);
 transition:border-color .15s,box-shadow .15s}
 .campo textarea{min-height:74px;resize:vertical;line-height:1.5}
 .campo input:focus,.campo select:focus,.campo textarea:focus{outline:none;
@@ -135,7 +146,7 @@ border-color:var(--z400);box-shadow:0 0 0 3px rgba(161,161,170,.20)}
 .campo input[disabled]{background:var(--z100);color:var(--z500)}
 .marca-check{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--text2);
 margin-top:9px;cursor:pointer}
-.marca-check input{width:16px;height:16px;accent-color:#18181B;cursor:pointer;flex:none}
+.marca-check input{width:16px;height:16px;accent-color:var(--tinta);cursor:pointer;flex:none}
 
 /* zona de peligro */
 .peligro-caja{background:var(--rojo-f);border:1px solid var(--rojo-b);border-radius:12px;
@@ -157,7 +168,7 @@ tr.mal td:first-child{box-shadow:inset 3px 0 0 var(--rojo)}
 .detalle-cel{font-size:12.5px;color:var(--text2);max-width:44ch}
 
 /* aviso con la clave temporal */
-.clave-nueva{background:#fff;border:1px solid var(--bord-2);border-radius:10px;
+.clave-nueva{background:var(--sup);border:1px solid var(--bord-2);border-radius:10px;
 padding:14px 17px;margin:12px 0 0;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .clave-nueva code{font-family:ui-monospace,'Cascadia Mono','Consolas',monospace;
 font-size:18px;letter-spacing:.06em;font-weight:600;color:var(--ink);
@@ -210,7 +221,7 @@ def nav(activo, rol):
                ('/rst', 'RST', 'rst'),
                ('/admin', 'Panel', 'panel'),
                ('/admin/cuentas', 'Cuentas', 'cuentas'),
-               ('/admin/declaraciones', 'Declaraciones', 'declaraciones'),
+               ('/admin/uso', 'Uso', 'uso'),
                ('/admin/bitacora', 'Bitácora', 'bitacora'),
                ('/admin/ajustes', 'Ajustes', 'ajustes')]
     return ''.join(
@@ -247,8 +258,8 @@ def vista_resumen(datos, usuario, token, error='', hecho=''):
     if pendientes:
         plural = 's' if pendientes != 1 else ''
         aviso_pendientes = (
-            f'<div class="aviso" style="margin:0 0 22px;border-color:#EADFC0;'
-            f'background:#FDFAF1"><b>{pendientes} cuenta{plural} '
+            f'<div class="aviso" style="margin:0 0 22px;border-color:var(--ambar-b);'
+            f'background:var(--ambar-f)"><b>{pendientes} cuenta{plural} '
             f'esperando aprobación.</b> Nadie puede entrar hasta que usted las '
             f'active. <a href="/admin/cuentas?estado=pendiente">Verlas ahora &rarr;</a></div>')
 
@@ -287,11 +298,17 @@ def vista_resumen(datos, usuario, token, error='', hecho=''):
 </div>
 <div class="aviso"><b>Qué puede hacer desde aquí.</b> En <a href="/admin/cuentas">Cuentas</a>
 aprueba, inhabilita o elimina personas y le fija a cada una cuántas declaraciones puede
-procesar. En <a href="/admin/declaraciones">Declaraciones</a> ve todos los casos de la
-plataforma y puede borrar los que no deban conservarse — se van también sus archivos.
+procesar. En <a href="/admin/uso">Uso</a> ve cuántos casos lleva cada cuenta —el número y
+nada más— y desde la ficha de cada una puede pedirle permiso para entrar a su cartera.
 En <a href="/admin/ajustes">Ajustes</a> abre o cierra el registro y decide el cupo con el que
 nace cada cuenta nueva. Todo lo que se hace queda escrito en la
-<a href="/admin/bitacora">bitácora</a>, con quién y cuándo.</div>"""
+<a href="/admin/bitacora">bitácora</a>, con quién y cuándo.</div>
+<div class="aviso"><b>Lo que no puede hacer, a propósito.</b> Ver las declaraciones de
+sus usuarios. Son datos tributarios de personas reales, sujetos a la reserva del
+art. 583 E.T., y quien responde por ellos es el contador que los cargó. Para entrar a
+una cartera hay que <b>pedirle permiso a su dueño</b>: él decide, decide por cuánto
+tiempo, y puede retirarlo cuando quiera. Cada solicitud y cada permiso quedan en la
+bitácora.</div>"""
     return _pagina('Panel', cuerpo, 'PANEL DE ADMINISTRACIÓN', usuario, 'admin',
                    'panel', error, hecho)
 
@@ -364,10 +381,72 @@ def vista_cuentas(lista, usadas_por, usuario, token, filtro='', error='', hecho=
 <div class="aviso"><b>Cupo</b> es cuántas declaraciones puede cargar esa cuenta en total.
 Al llegar al tope la persona sigue entrando y consultando lo suyo, pero no puede procesar
 más. <b>Inhabilitar</b> deja la cuenta y sus declaraciones intactas y le cierra la sesión
-en el acto; <b>eliminar</b>, en la ficha, es definitivo. Un contador o un administrador ven
-toda la cartera y por eso nunca tienen cupo.</div>"""
+en el acto; <b>eliminar</b>, en la ficha, es definitivo. El administrador no procesa
+declaraciones y por eso nunca tiene cupo — y tampoco ve las de nadie sin permiso.</div>"""
     return _pagina('Cuentas', cuerpo, 'CUENTAS REGISTRADAS', usuario, 'admin',
                    'cuentas', error, hecho)
+
+
+def _bloque_acceso(u, permiso, usadas, token, yo):
+    """Qué puede saber el administrador de la cartera de esta cuenta.
+
+    La respuesta corta es: **cuántos casos lleva, y nada más**. Ni el nombre de
+    un contribuyente, ni una cédula, ni un año, ni una cifra. Son datos
+    tributarios de terceros —reserva del art. 583 E.T.— y el titular de la
+    cuenta es quien responde por ellos, no el dueño de la plataforma.
+
+    Para entrar hay que pedírselo, y él concede por un tiempo limitado.
+    """
+    if yo:
+        return ''
+    estado = (permiso or {}).get('estado')
+    vigente = permisos.Permisos.vigente(permiso)
+
+    if vigente:
+        cuadro = f"""<div class="ok-msg" style="margin:0">
+Tiene acceso a esta cartera hasta el
+<b>{e(cuentas.fecha_corta(permiso.get('expira_en')))}</b>
+({e(cuentas.hace_cuanto(permiso.get('respondido_en')))} se lo concedió).
+Después se cierra solo. El titular puede retirarlo antes cuando quiera.</div>
+<p style="margin-top:14px"><a class="mini sec" href="/">Ir a la bandeja</a>
+<span class="pista">Sus casos aparecen mezclados con los suyos, marcados con el
+nombre de la cuenta.</span></p>"""
+    else:
+        if estado == 'pendiente':
+            aviso = ('<div class="aviso" style="margin:0 0 14px"><b>Ya se lo pidió.</b> '
+                     'La solicitud le aparece al titular en cuanto entre, con el motivo '
+                     'que usted escribió. Puede volver a pedirlo con otro motivo.</div>')
+        elif estado == 'denegado':
+            aviso = ('<div class="aviso" style="margin:0 0 14px"><b>Le dijo que no.</b> '
+                     'Puede volver a pedirlo, pero considere preguntarle antes por otro '
+                     'medio.</div>')
+        elif estado in ('revocado', 'concedido'):
+            aviso = ('<div class="aviso" style="margin:0 0 14px">El acceso que tenía '
+                     '<b>ya no está vigente</b>: venció o el titular lo retiró.</div>')
+        else:
+            aviso = ''
+        cuadro = f"""{aviso}
+<form method="post" action="/admin/cuenta/{e(u['id'])}/permiso">{_t(token)}
+  <div class="campo"><label for="motivo">Por qué necesita entrar</label>
+    <input id="motivo" name="motivo" type="text" maxlength="400"
+           placeholder="Ej.: revisar el caso que reportó por correo el 12 de agosto">
+    <span class="pista">Lo lee el titular antes de decidir. Escribirlo bien es la
+    diferencia entre que le abra y que no.</span></div>
+  <button class="mini sec" type="submit" style="margin-top:14px">Pedir acceso a esta
+  cartera</button>
+</form>"""
+
+    return f"""
+<div class="seccion">
+  <h2>Su cartera<span class="nota">{usadas} caso(s)</span></h2>
+  <div class="cuerpo">
+    <p>De las declaraciones de esta cuenta usted sabe <b>cuántas son</b>, y eso es
+    todo. No ve el nombre de ningún contribuyente, ni su cédula, ni las cifras: son
+    datos de terceros sujetos a reserva, y quien responde por ellos es el titular de
+    la cuenta.</p>
+    {cuadro}
+  </div>
+</div>"""
 
 
 def vista_cuenta(u, datos, usuario, token, error='', hecho='', clave_nueva=''):
@@ -420,14 +499,10 @@ Al entrar, se le exigirá cambiarla.</span></div></div></div>"""
     sin_limite = ' checked' if u['cupo'] is None else ''
     cuerpo_cupo = ('' if u['rol'] == 'cliente' else
                    '<p>Esta cuenta es de ' + e(cuentas.ROL_ET[u['rol']][0].lower()) +
-                   ': ve toda la cartera, así que el cupo no le aplica. Si la pasa a '
-                   'cliente, podrá fijárselo.</p>')
+                   ': no procesa declaraciones para terceros, así que el cupo no le '
+                   'aplica. Si la pasa a cliente, podrá fijárselo.</p>')
 
-    # ── sus declaraciones ──
-    filas_decl = ''.join(_fila_declaracion(d, token, compacta=True)
-                         for d in datos['declaraciones'])
-    if not filas_decl:
-        filas_decl = _sin_filas('Esta cuenta no ha cargado ninguna declaración.', 6)
+    bloque_acceso = _bloque_acceso(u, datos.get('permiso'), usadas, token, yo)
 
     marca_yo = ' <span class="yo">(es usted)</span>' if yo else ''
     cuerpo = f"""
@@ -531,13 +606,7 @@ Al entrar, se le exigirá cambiarla.</span></div></div></div>"""
   </div>
 </div>
 
-<div class="seccion">
-  <h2>Declaraciones de esta cuenta<span class="nota">{usadas} caso(s)</span></h2>
-  <table><thead><tr><th>Contribuyente</th><th style="width:78px">Año</th>
-    <th style="width:110px">Semáforo</th><th style="width:120px">Estado</th>
-    <th style="width:120px">Cargada</th><th style="width:170px"></th>
-  </tr></thead><tbody>{filas_decl}</tbody></table>
-</div>
+{bloque_acceso}
 
 <div class="peligro-caja">
   <h2>Eliminar esta cuenta</h2>
@@ -642,52 +711,68 @@ def vista_nueva_cuenta(usuario, token, valores=None, error=''):
                    'cuentas', error)
 
 
-# ── declaraciones ───────────────────────────────────────────────────────
-def _fila_declaracion(d, token, compacta=False):
-    sem = d.get('semaforo') or '—'
-    color = {'VERDE': VERDE, 'AMARILLO': AMBAR, 'ROJO': ROJO}.get(sem, GRIS)
-    est_color, est_texto = render.ESTADO_ET.get(d.get('estado', 'borrador'),
-                                                render.ESTADO_ET['borrador'])
-    persona = ((d.get('contribuyentes') or {}).get('nombre_titulo')
-               or d.get('persona') or 'Sin nombre')
-    ident = (d.get('contribuyentes') or {}).get('identificacion', '')
-
-    dueno = ''
-    if not compacta:
-        marca = '' if d.get('dueno_existe', True) else \
-            ' <span class="pista" style="color:var(--z400)">sin cuenta</span>'
-        dueno = f'<td class="cuenta-cel"><b>{e(d.get("creada_por") or "—")}</b>{marca}</td>'
-
+# ── uso de la plataforma ────────────────────────────────────────────────
+# Lo que ANTES era «todas las declaraciones», con nombre y cédula de cada
+# contribuyente a la vista del administrador. Ya no: de la cartera ajena solo
+# se informa **cuántos casos** lleva cada cuenta. Son datos tributarios de
+# terceros y el titular de la cuenta es quien responde por ellos.
+def _fila_uso(u, n_renta, n_rst, con_acceso):
+    cupo = _cupo_celda(n_renta, u['cupo'])
+    acceso = (tag('Con acceso', VERDE, solido=True) if con_acceso
+              else '<span class="pista">—</span>')
     return f"""<tr>
-<td class="cuenta-cel"><b>{e(persona)}</b><span>{e(ident)}</span></td>
-<td class="cod">AG {e(d.get('ano_gravable', ''))}</td>
-<td>{tag(sem, color, solido=(sem != '—'))}</td>
-<td>{tag(est_texto, est_color)}</td>{dueno}
-<td class="mono-t">{e(cuentas.hace_cuanto(d.get('creado_en')))}</td>
+<td class="cuenta-cel"><b>{e(u['usuario'])}</b><span>{e(u['nombre'])}</span></td>
+<td>{tag_rol(u['rol'])}</td>
+<td>{tag_estado(u['estado'])}</td>
+<td class="n">{n_renta}</td>
+<td class="n">{n_rst}</td>
+<td>{cupo}</td>
+<td>{acceso}</td>
+<td class="mono-t">{e(cuentas.hace_cuanto(u.get('ultimo_acceso')))}</td>
 <td><div class="acc-fila">
-  <a class="mini sec" href="/caso/{e(d['id'])}">Ver</a>
+  <a class="mini sec" href="/admin/cuenta/{e(u['id'])}">Ver la cuenta</a>
 </div></td></tr>"""
 
 
-def vista_declaraciones(lista, usuario, token, error='', hecho=''):
-    filas = ''.join(_fila_declaracion(d, token) for d in lista) or _sin_filas(
-        'Todavía no hay declaraciones en la plataforma.', 7)
+def vista_uso(lista, renta, rst, con_acceso, usuario, token, error='', hecho=''):
+    """Cuántos casos lleva cada cuenta. Sin un solo dato de contribuyente."""
+    permitidos = set(con_acceso or ())
+    filas = ''.join(_fila_uso(u, renta.get(u['usuario'], 0), rst.get(u['usuario'], 0),
+                              u['usuario'] in permitidos)
+                    for u in lista) or _sin_filas('Todavía no hay cuentas.', 9)
+    total_renta, total_rst = sum(renta.values()), sum(rst.values())
+    # Casos cuyo dueño ya no tiene cuenta: se cuentan aparte para que los
+    # totales cuadren y para que no pasen inadvertidos.
+    conocidos = {u['usuario'] for u in lista}
+    sueltos = sum(n for k, n in renta.items() if k not in conocidos)
+    nota_sueltos = ('' if not sueltos else
+                    f'<div class="aviso" style="margin-top:0"><b>{sueltos} '
+                    f'declaración(es)</b> figuran a nombre de una cuenta que ya no '
+                    f'existe. Nadie las ve. Para recuperarlas hay que volver a crear '
+                    f'esa cuenta con el mismo nombre de usuario.</div>')
     cuerpo = f"""
 <div class="seccion">
-  <h2>Todas las declaraciones<span class="nota">{len(lista)} caso(s)</span></h2>
+  <h2>Uso por cuenta<span class="nota">{total_renta} de renta &middot; {total_rst} de RST</span></h2>
   <table><thead><tr>
-    <th>Contribuyente</th><th style="width:88px">Año</th><th style="width:110px">Semáforo</th>
-    <th style="width:120px">Estado</th><th style="width:150px">La cargó</th>
-    <th style="width:120px">Cuándo</th><th style="width:150px"></th>
+    <th>Cuenta</th><th style="width:120px">Rol</th><th style="width:110px">Estado</th>
+    <th class="n" style="width:90px">Renta</th><th class="n" style="width:80px">RST</th>
+    <th style="width:140px">Cupo</th><th style="width:120px">Su cartera</th>
+    <th style="width:120px">Último acceso</th><th style="width:130px"></th>
   </tr></thead><tbody>{filas}</tbody></table>
 </div>
+{nota_sueltos}
+<div class="aviso"><b>Esto es todo lo que usted puede ver de la cartera ajena: el
+número.</b> Ni el nombre de un contribuyente, ni una cédula, ni un año, ni una cifra.
+Son datos tributarios de terceros —reserva del art. 583 E.T.— y quien responde por
+ellos es el titular de cada cuenta, no usted. Para entrar a una cartera, ábrala desde
+su ficha y <b>pídale permiso a su dueño</b>: él decide, y decide por cuánto tiempo.</div>
 <div class="aviso"><b>Las declaraciones no se eliminan.</b> Una vez procesada, la
-declaración queda en la cartera y el cupo que consumió sigue consumido. Es deliberado:
-el cupo es lo que se vende, y si borrar lo devolviera, una cuenta de cupo 1 podría
-procesar sin límite subiendo, borrando y volviendo a subir. Para dejar de dar servicio a
-una cuenta, inhabilítela; para ampliarla, súbale el cupo desde su ficha.</div>"""
-    return _pagina('Declaraciones', cuerpo, 'TODAS LAS DECLARACIONES', usuario,
-                   'admin', 'declaraciones', error, hecho)
+declaración queda y el cupo que consumió sigue consumido. Es deliberado: el cupo es lo
+que se vende, y si borrar lo devolviera, una cuenta de cupo 1 podría procesar sin
+límite subiendo, borrando y volviendo a subir. Para dejar de dar servicio a una cuenta,
+inhabilítela; para ampliarla, súbale el cupo desde su ficha.</div>"""
+    return _pagina('Uso', cuerpo, 'USO DE LA PLATAFORMA, POR CUENTA', usuario,
+                   'admin', 'uso', error, hecho)
 
 
 # ── bitácora ────────────────────────────────────────────────────────────
@@ -695,11 +780,19 @@ def _fila_bitacora(b):
     texto, clase = ACCION_ET.get(b['accion'], (b['accion'].replace('_', ' '), ''))
     if not b.get('exito'):
         clase = 'mal'
+    objeto = b.get('objeto') or ''
+    if b.get('accion') in ACCIONES_RESERVADAS and not objeto.startswith(
+            ('declaración ', 'recibo ')):
+        # Fila vieja: ahí quedó escrito el nombre de un contribuyente. Se tapa.
+        objeto = ('<span class="pista" title="Dato de un contribuyente: '
+                  'sujeto a reserva">(reservado)</span>')
+    else:
+        objeto = e(objeto)
     return f"""<tr class="{clase}">
 <td class="mono-t" title="{e(cuentas.fecha_corta(b['ocurrido_en']))}">{e(cuentas.hace_cuanto(b['ocurrido_en']))}</td>
 <td class="cuenta-cel"><b>{e(b.get('usuario') or '—')}</b></td>
 <td>{e(texto)}</td>
-<td class="detalle-cel">{e(b.get('objeto') or '')}
+<td class="detalle-cel">{objeto}
   {'<br><span style="color:var(--z400)">' + e(b['detalle']) + '</span>' if b.get('detalle') else ''}</td>
 <td class="mono-t">{e(b.get('ip') or '—')}</td></tr>"""
 
@@ -788,6 +881,53 @@ publicarlo. Cada cambio queda en la bitácora con su nombre y la hora.</div>"""
                    'ajustes', error, hecho)
 
 
+def _bloque_accesos_dados(concedidos, token):
+    """Quién puede entrar hoy a MIS declaraciones, y el botón para cortarlo.
+
+    Aparece siempre, aunque no haya nadie: que la respuesta sea «nadie» es
+    justamente lo que el titular necesita poder comprobar de un vistazo.
+    """
+    if not concedidos:
+        cuerpo = ('<p><b>Nadie.</b> Solo usted ve sus declaraciones. Si alguien '
+                  'necesita entrar, tendrá que pedírselo y le aparecerá un aviso '
+                  'en la bandeja.</p>')
+    else:
+        filas = []
+        for p in concedidos:
+            if p.get('vigente'):
+                cuando = (f'hasta el <b>{e(cuentas.fecha_corta(p.get("expira_en")))}</b>'
+                          f' <span class="pista">'
+                          f'({e(cuentas.hace_cuanto(p.get("respondido_en")))} se lo dio)'
+                          f'</span>')
+                marca = tag('Vigente', VERDE, solido=True)
+            else:
+                cuando = (f'<span class="pista">venció el '
+                          f'{e(cuentas.fecha_corta(p.get("expira_en")))}</span>')
+                marca = tag('Vencido', GRIS)
+            filas.append(f"""<tr>
+<td class="cuenta-cel"><b>{e(p['solicitante'])}</b></td>
+<td>{marca}</td>
+<td>{cuando}</td>
+<td><form method="post" action="/permiso/{e(p['solicitante'])}/revocar">{_t(token)}
+  <button class="mini peligro" type="submit">Retirar el acceso</button></form></td>
+</tr>""")
+        cuerpo = (f'<p>Estas cuentas han podido entrar a sus declaraciones. '
+                  f'Retirar el acceso surte efecto <b>de inmediato</b>.</p>'
+                  f'<table style="margin-top:12px"><thead><tr>'
+                  f'<th>Cuenta</th><th style="width:110px">Estado</th>'
+                  f'<th>Hasta cuándo</th><th style="width:160px"></th>'
+                  f'</tr></thead><tbody>{"".join(filas)}</tbody></table>')
+    return f"""
+<div class="seccion">
+  <h2>Quién más ve mis declaraciones</h2>
+  <div class="cuerpo">{cuerpo}
+    <p class="pista" style="margin-top:14px">Ni el administrador de la plataforma
+    ve sus declaraciones sin que usted se lo conceda, y lo que conceda vence solo.
+    Los contribuyentes que usted atiende son suyos.</p>
+  </div>
+</div>"""
+
+
 # ── mi cuenta (cualquier rol) ───────────────────────────────────────────
 def vista_mi_cuenta(u, datos, token, error='', hecho=''):
     """La ficha propia. La ve cualquiera; nadie edita permisos desde aquí."""
@@ -797,6 +937,7 @@ def vista_mi_cuenta(u, datos, token, error='', hecho=''):
     if u['cupo']:
         pct = min(100, int(datos['usadas'] * 100 / u['cupo']))
         barra = f'<div class="b" style="margin-top:7px"><i style="width:{pct}%"></i></div>'
+    accesos = _bloque_accesos_dados(datos.get('accesos') or [], token)
 
     cuerpo = f"""
 <div class="seccion">
@@ -813,6 +954,8 @@ def vista_mi_cuenta(u, datos, token, error='', hecho=''):
     <div class="campo"><label>Declaraciones cargadas</label><div>{datos['usadas']}</div></div>
   </div></div>
 </div>
+
+{accesos}
 
 <div class="seccion">
   <h2>Cambiar mi contraseña</h2>
@@ -844,6 +987,6 @@ def vista_mi_cuenta(u, datos, token, error='', hecho=''):
                        or _sin_filas('Sin movimientos registrados.', 5)}</tbody></table>
 </div>
 <div class="aviso">Si ve aquí un acceso que no reconoce, cambie su contraseña de inmediato
-y avísele al contador.</div>"""
+y avísele al administrador.</div>"""
     return _pagina('Mi cuenta', cuerpo, 'MI CUENTA', u['usuario'], u['rol'],
                    '', error, hecho)

@@ -51,10 +51,13 @@ create table if not exists declaraciones (
   libro_path        text,
   exogena_path      text,
 
-  -- quién la cargó: sostiene el cupo de cada cuenta e impide que un usuario
-  -- restringido sobrescriba el caso de otro. 'contador' es el valor que deja
-  -- la sincronización desde el equipo de escritorio.
-  creada_por        text not null default 'contador',
+  -- Quién la cargó. Sostiene tres cosas a la vez: el cupo de esa cuenta, que
+  -- un usuario no sobrescriba el caso de otro, y —desde agosto de 2026— QUIÉN
+  -- PUEDE VERLA. Nadie ve una declaración que no cargó, salvo con permiso
+  -- concedido por su dueño (ver tabla permisos).
+  -- 'admin' es el valor por defecto: lo dejan los casos que se suben desde el
+  -- equipo de escritorio con sincronizar.py, que son del dueño del sistema.
+  creada_por        text not null default 'admin',
 
   creado_en         timestamptz not null default now(),
   actualizado_en    timestamptz not null default now(),
@@ -97,8 +100,11 @@ create table if not exists usuarios (
   -- pbkdf2_sha256$<iteraciones>$<sal>$<hash>; jamás la contraseña en claro
   clave_hash         text not null,
 
+  -- Dos roles y no tres. «contador» existía cuando se pensaba que el contador
+  -- era quien atendía a los usuarios; hoy el usuario ES el contador. El admin
+  -- administra la plataforma y NO ve declaraciones ajenas (ver tabla permisos).
   rol                text not null default 'cliente'
-                     check (rol in ('admin','contador','cliente')),
+                     check (rol in ('admin','cliente')),
   estado             text not null default 'activo'
                      check (estado in ('activo','pendiente','inhabilitado')),
 
@@ -179,6 +185,49 @@ create trigger trg_ajustes_actualizado
   before update on ajustes
   for each row execute function tocar_actualizado_en();
 
+-- ── Permisos de acceso a la cartera ajena ───────────────────────────────
+-- El administrador NO ve las declaraciones de nadie. Para entrar a las de una
+-- cuenta tiene que pedírselo a su dueño, y el dueño concede por un tiempo
+-- limitado. Es la regla de privacidad del producto, no una comodidad: son
+-- datos tributarios de terceros, sujetos a la reserva del art. 583 E.T.
+create table if not exists permisos (
+  id            bigserial primary key,
+  usuario       text not null,     -- dueño de las declaraciones
+  solicitante   text not null,     -- quien pide entrar (el administrador)
+  estado        text not null default 'pendiente'
+                check (estado in ('pendiente','concedido','denegado','revocado')),
+  motivo        text,              -- por qué lo pide; lo lee el dueño al decidir
+  solicitado_en timestamptz not null default now(),
+  respondido_en timestamptz,
+  -- Null mientras está pendiente. Un permiso vale solo si está concedido Y
+  -- esta fecha no ha pasado: la caducidad se comprueba al leer, sin tarea
+  -- programada que mantener.
+  expira_en     timestamptz,
+  unique (usuario, solicitante)
+);
+
+create index if not exists idx_permisos_solicitante on permisos(solicitante);
+create index if not exists idx_permisos_usuario     on permisos(usuario);
+
+-- ── Borradores: la carga en dos pasos ───────────────────────────────────
+-- La exógena se procesa al subirla, pero la declaración NO se crea hasta que
+-- el usuario ve lo que salió, responde lo que el archivo no trae y acepta el
+-- descargo. Así un archivo equivocado no consume cupo — y el cupo sigue sin
+-- devolverse nunca, que es lo que impide reciclarlo.
+create table if not exists borradores (
+  id             uuid primary key default gen_random_uuid(),
+  usuario        text not null,
+  cliente        jsonb not null,    -- el CLIENTE ya clasificado
+  textos         jsonb not null,    -- los TEXTOS del libro
+  exogena_path   text,              -- borradores/<id>/<archivo> en el bucket
+  nombre_exogena text,
+  creado_en      timestamptz not null default now(),
+  expira_en      timestamptz not null default now() + interval '2 hours'
+);
+
+create index if not exists idx_borradores_usuario on borradores(usuario);
+create index if not exists idx_borradores_expira  on borradores(expira_en);
+
 -- ── Seguridad ───────────────────────────────────────────────────────────
 -- RLS activa y SIN políticas públicas: solo el service_role (backend) entra.
 -- El navegador nunca habla con Supabase, así que no hacen falta políticas por
@@ -190,9 +239,43 @@ alter table alertas        enable row level security;
 alter table usuarios       enable row level security;
 alter table bitacora       enable row level security;
 alter table ajustes        enable row level security;
+alter table permisos       enable row level security;
+alter table borradores     enable row level security;
 
 -- ── Storage ─────────────────────────────────────────────────────────────
 -- Crear en el panel de Supabase dos buckets PRIVADOS (nunca públicos):
 --     exogenas   → los reportes que sube el contribuyente
 --     libros     → los .xlsx generados
 -- Se sirven con URLs firmadas de vigencia corta, jamás con enlace público.
+-- Los borradores viven bajo el prefijo `borradores/` del bucket `exogenas` y
+-- se borran al confirmar o al vencer.
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  MIGRACIÓN — bases que ya existían antes de agosto de 2026
+--
+--  Correr este bloque UNA vez sobre una base ya creada. En una base nueva no
+--  hace falta: lo de arriba ya lo deja así.
+--
+--  El orden importa: primero se mueven las filas, después se estrecha la
+--  restricción. Al revés, el ALTER fallaría por las filas que aún dicen
+--  'contador'.
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- update usuarios set rol = 'cliente' where rol = 'contador';
+--
+-- alter table usuarios drop constraint if exists usuarios_rol_check;
+-- alter table usuarios add  constraint usuarios_rol_check
+--   check (rol in ('admin','cliente'));
+--
+-- -- Los casos que subió el equipo de escritorio quedaron a nombre de una
+-- -- cuenta técnica llamada 'contador'. Ahora que nadie ve lo que no cargó,
+-- -- esa cuenta inhabilitada los dejaría invisibles para todo el mundo: pasan
+-- -- a nombre del administrador, que es de quien son.
+-- update declaraciones set creada_por = 'admin' where creada_por = 'contador';
+-- update recibos_rst   set creada_por = 'admin' where creada_por = 'contador';
+--
+-- alter table declaraciones alter column creada_por set default 'admin';
+-- alter table recibos_rst   alter column creada_por set default 'admin';
+--
+-- -- Y la cuenta técnica ya no hace falta.
+-- delete from usuarios where usuario = 'contador';

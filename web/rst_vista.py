@@ -7,6 +7,7 @@ que se muestra —aquí el período es un bimestre y las cifras son las del
 Formulario 2593— y el semáforo, que en el SIMPLE sale de razones que deben dar
 exactas en vez de los topes precalculados de la DIAN.
 """
+import legal
 import render
 from render import AMBAR, AZUL, ESTADO_ET, GRIS, ROJO, VERDE, e, pesos
 
@@ -116,7 +117,8 @@ def vista_bandeja(lista, error='', usuario='', pie=render.PIE_LOCAL,
                 f'<span class="cuenta" id="cuenta">{len(grupos)} contribuyente{plural}</span>'
                 f'<input id="q" type="search" placeholder="Buscar por nombre o NIT…"></div>'
               + listado + render.BUSCADOR)
-    return render.pagina('RST', cuerpo, SUB, stats, usuario, pie, nav, rol)
+    return render.pagina('RST', cuerpo, SUB, stats, usuario, pie, nav, rol,
+                         apartado='rst')
 
 
 def formulario(token='', cupo=None):
@@ -130,7 +132,7 @@ def formulario(token='', cupo=None):
         return (f'<div class="subir"><h2>Procesar un bimestre del SIMPLE</h2>'
                 f'<p>Su cupo está completo: ha procesado <b>{cupo[0]} de {cupo[1]}</b>. '
                 f'Puede seguir consultando lo que ya cargó; para ampliarlo, escriba '
-                f'al contador.</p></div>')
+                f'al administrador.</p></div>')
     # El grupo NO viene preseleccionado a propósito: define la tarifa y puede
     # duplicar el impuesto. Dejar uno por defecto hacía que se liquidara con él
     # sin que nadie lo hubiera decidido.
@@ -166,6 +168,8 @@ que el IVA sea el 19&nbsp;% de los ingresos gravados y la ReteIVA el 15&nbsp;% d
     <label class="ancho">Aporte a pensión pagado en el bimestre (total, 16&nbsp;% del IBC)
       <input name="aporte_pension_total" placeholder="de la planilla PILA — 0 si no hubo"></label>
   </div>
+  {legal.bloque()}
+  {legal.casilla()}
   <div class="rst-archivo">
     <input type="file" name="archivo" accept=".xlsx" required>
     <button type="submit">Procesar el bimestre</button>
@@ -282,12 +286,14 @@ def vista_recibo(caso, usuario='', pie=render.PIE_LOCAL, mostrar_estado=False,
 <div class="aviso"><b>El libro de Excel es el papel de trabajo definitivo.</b> Sus casillas
 de fondo crema quedan abiertas —la tarifa de ICA, la planilla de pensión del mes anterior,
 el saldo a favor del bimestre— y al diligenciarlas toda la liquidación se recalcula sola.
-Esta vista no reemplaza esa revisión.</div>{acciones}"""
+Esta vista no reemplaza esa revisión.</div>
+{legal.bloque(destacado=False)}{acciones}"""
     return render.pagina(
         caso['persona'], cuerpo,
         f"NIT {e(caso['identificacion'])} &nbsp;&middot;&nbsp; AÑO GRAVABLE {e(caso['ano'])}"
         f" &nbsp;&middot;&nbsp; {e(caso['periodo']).upper()} &nbsp;&middot;&nbsp; GRUPO "
-        f"{e(f.get('grupo'))}", '', usuario, pie, nav, rol, estilo_extra)
+        f"{e(f.get('grupo'))}", '', usuario, pie, nav, rol, estilo_extra,
+        apartado='rst')
 
 
 ESTILO = """
@@ -298,7 +304,7 @@ ESTILO = """
 .rst-campos label.ancho{grid-column:span 2}
 .rst-campos input,.rst-campos select{padding:9px 10px;border:1px solid var(--bord);
   border-radius:8px;font:inherit;font-size:14px;text-transform:none;letter-spacing:0;
-  color:var(--ink);background:#fff}
+  color:var(--ink);background:var(--sup)}
 .rst-archivo{display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap}
 .rst-archivo button{padding:11px 20px;border:0;border-radius:8px;background:#18181B;
   color:#fff;font:inherit;font-weight:600;cursor:pointer}

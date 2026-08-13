@@ -8,12 +8,10 @@ r"""Deja la nube lista para el sistema de cuentas. Se corre una sola vez.
 Qué hace:
 
   · Crea los buckets privados si faltan.
-  · Crea la cuenta técnica «contador», que es la que figura como dueña de los
-    casos subidos desde el equipo de escritorio (`sincronizar.py` no pasa
-    usuario, así que la base les pone ese valor por defecto). Nace inhabilitada
-    y con una contraseña que nadie conoce: existe para que esos casos tengan un
-    dueño con nombre en el panel, no para entrar con ella. Si algún día se
-    quiere usar, se activa y se le restablece la clave desde el panel.
+  · Retira la cuenta técnica «contador» si quedó de antes, y pone a nombre del
+    administrador los casos que subió el equipo de escritorio. Desde que nadie
+    ve lo que no cargó, un dueño inhabilitado los dejaría invisibles para todo
+    el mundo — y son del dueño del sistema.
   · Crea el administrador SOLO si se le da una contraseña. Sin ella no lo
     toca, a propósito: en el sitio publicado la cuenta «admin» se crea sola en
     el primer acceso a partir de RENTA_IA_CLAVE_ADMIN, que ya está puesta en
@@ -24,7 +22,6 @@ Es idempotente: correrlo dos veces no duplica ni pisa nada.
 """
 import argparse
 import os
-import secrets
 import sys
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -68,23 +65,21 @@ def inicializar(aplicar=False, admin_clave='', log=print):
     else:
         log('  ya están los buckets «libros» y «exogenas».')
 
-    log('\nCuenta técnica del equipo de escritorio')
-    if c.buscar('contador'):
-        log('  la cuenta «contador» ya existe.')
+    log('\nCasos del equipo de escritorio')
+    huerfanos = s.contar('declaraciones', creada_por='eq.contador')
+    tecnica = c.buscar('contador')
+    if not huerfanos and not tecnica:
+        log('  nada que arreglar: no quedan casos ni cuenta técnica «contador».')
     else:
-        casos = s.contar('declaraciones', creada_por='eq.contador')
-        hacer(f'crear «contador» (inhabilitada) — figura como dueña de {casos} caso(s)',
-              lambda: c.crear(
-                  'contador', 'Contador (equipo de escritorio)',
-                  # Nadie la sabe ni la necesita: se entra restableciéndola
-                  # desde el panel, no adivinándola.
-                  secrets.token_urlsafe(32),
-                  rol='contador', estado='inhabilitado', creado_por='(arranque)',
-                  reservado_ok=True,
-                  notas='Cuenta técnica: es la que la base pone por defecto en '
-                        'los casos que se suben desde el equipo del contador con '
-                        'sincronizar.py. Para usarla, actívela y restablézcale la '
-                        'contraseña desde este panel.'))
+        if huerfanos:
+            log(f'  {huerfanos} caso(s) figuran a nombre de «contador», una cuenta')
+            log('  inhabilitada. Desde que nadie ve lo que no cargó, eso los deja')
+            log('  invisibles para todo el mundo.')
+        hacer('pasar esos casos a «admin» y retirar la cuenta técnica',
+              c.migrar_rol_contador)
+        if tecnica:
+            hacer('eliminar la cuenta «contador», que ya no tiene función',
+                  lambda: c.eliminar(tecnica['id'], por='(arranque)'))
 
     log('\nAdministrador')
     clave = admin_clave or _env('RENTA_IA_CLAVE_ADMIN')

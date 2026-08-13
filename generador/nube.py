@@ -33,7 +33,7 @@ def _armar(fila):
         'ref': fila['id'],
         'id': fila['id'],
         'estado': fila.get('estado') or 'borrador',
-        'creada_por': fila.get('creada_por') or 'contador',
+        'creada_por': fila.get('creada_por') or 'admin',
         'libro_path': fila.get('libro_path'),
         'exogena_path': fila.get('exogena_path'),
         'libro': os.path.basename(fila['libro_path']) if fila.get('libro_path') else None,
@@ -49,24 +49,41 @@ def _armar(fila):
 def listar(cliente=None, solo_de=None):
     """Casos de la nube, del año más reciente al más antiguo.
 
-    `solo_de` restringe a los que cargó ese usuario: con datos tributarios de
-    terceros, un usuario de prueba no tiene por qué ver la cartera completa.
+    `solo_de` restringe a los que cargaron esos usuarios —un nombre o una
+    lista—. Son datos tributarios de terceros: nadie ve lo que no cargó, salvo
+    con permiso vigente de su dueño (ver `permisos.py`).
     """
     s = cliente or db.Supabase.desde_env()
     filtros = {'select': CAMPOS, 'order': 'ano_gravable.desc'}
-    if solo_de:
-        filtros['creada_por'] = 'eq.' + solo_de
+    dueno = s.filtro_dueno(solo_de)
+    if dueno:
+        filtros['creada_por'] = dueno
     return [_armar(f) for f in s.seleccionar('declaraciones', **filtros)]
 
 
-def buscar(ref, cliente=None, solo_de=None):
-    """Un caso por su id. Devuelve None si no existe o no es de ese usuario."""
+def buscar(ref, cliente=None, solo_de=None, con_alertas=True):
+    """Un caso por su id. Devuelve None si no existe o no lo puede ver.
+
+    Con `con_alertas`, las alertas vienen de la tabla y no del JSON del caso:
+    es la única forma de saber cuáles dio por resueltas el contador. El JSON
+    guarda lo que dijo el clasificador; la tabla guarda además lo que hizo la
+    persona con eso.
+    """
     s = cliente or db.Supabase.desde_env()
     filtros = {'select': CAMPOS, 'id': 'eq.' + str(ref)}
-    if solo_de:
-        filtros['creada_por'] = 'eq.' + solo_de
+    dueno = s.filtro_dueno(solo_de)
+    if dueno:
+        filtros['creada_por'] = dueno
     filas = s.seleccionar('declaraciones', **filtros)
-    return _armar(filas[0]) if filas else None
+    if not filas:
+        return None
+    caso = _armar(filas[0])
+    if con_alertas:
+        try:
+            caso['alertas'] = s.alertas_de(caso['ref'])
+        except db.ErrorSupabase:
+            caso['alertas'] = []
+    return caso
 
 
 def cuantas_lleva(usuario, cliente=None):

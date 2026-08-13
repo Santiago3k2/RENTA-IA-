@@ -175,11 +175,16 @@ def _adaptar(fila, contribuyentes):
 
 
 def listar(s, solo_de=None, limite=400):
-    """Los recibos de la cartera, del más reciente al más antiguo."""
+    """Los recibos de la cartera, del más reciente al más antiguo.
+
+    `solo_de` acepta un nombre o una lista: nadie ve lo que no cargó, salvo con
+    permiso vigente de su dueño.
+    """
     filtros = {'select': '*', 'order': 'ano_gravable.desc,bimestre.desc,creado_en.desc',
                'limit': str(limite)}
-    if solo_de:
-        filtros['creada_por'] = 'eq.' + solo_de
+    dueno = s.filtro_dueno(solo_de)
+    if dueno:
+        filtros['creada_por'] = dueno
     filas = s.seleccionar(TABLA, **filtros)
     if not filas:
         return []
@@ -191,10 +196,11 @@ def listar(s, solo_de=None, limite=400):
 
 
 def buscar(s, ref, solo_de=None):
-    """Un recibo por su id, con sus alertas. None si no existe o no es suyo."""
+    """Un recibo por su id, con sus alertas. None si no existe o no lo puede ver."""
     filtros = {'select': '*', 'id': 'eq.' + str(ref)}
-    if solo_de:
-        filtros['creada_por'] = 'eq.' + solo_de
+    dueno = s.filtro_dueno(solo_de)
+    if dueno:
+        filtros['creada_por'] = dueno
     filas = s.seleccionar(TABLA, **filtros)
     if not filas:
         return None

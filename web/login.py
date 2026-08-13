@@ -17,6 +17,11 @@ la pantalla se pinte completa en la primera respuesta.
 """
 import html
 
+# Solo por el favicon y el descargo: la pantalla de acceso tiene su propia hoja
+# de estilos a propósito —es la única página del sitio con fondo y viñeta— pero
+# el icono de la pestaña y el texto legal son los mismos de todas.
+import render
+
 
 def e(t):
     return html.escape(str(t), quote=True)
@@ -27,6 +32,29 @@ ESTILO = """
   --z50:#FAFAFA; --z100:#F4F4F5; --z200:#E4E4E7; --z300:#D4D4D8;
   --z400:#A1A1AA; --z500:#71717A; --z600:#52525B; --z900:#18181B; --z950:#09090B;
   --rojo:#B42318; --rojo-fondo:#FEF3F2; --rojo-borde:#FECDCA;
+  --sup:#FFFFFF;
+  color-scheme:light;
+}
+/* La pantalla de acceso sigue la preferencia del sistema, igual que el resto
+   del sitio. Aquí no hay interruptor porque todavía no hay sesión donde
+   recordar la elección: se respeta lo que diga el equipo. */
+@media (prefers-color-scheme: dark){
+  :root{
+    --z50:#1F1F23; --z100:#27272A; --z200:#3F3F46; --z300:#52525B;
+    --z400:#8B8B94; --z500:#A1A1AA; --z600:#D4D4D8; --z900:#FAFAFA; --z950:#FFFFFF;
+    --rojo:#FCA5A5; --rojo-fondo:#2A1616; --rojo-borde:#7F2A22;
+    --sup:#18181B;
+    color-scheme:dark;
+  }
+  /* Lo que no cabía en un token: los tres fondos translúcidos y la viñeta,
+     que están hechos con rgba() sobre blanco y en oscuro habría que
+     invertirlos. Son cuatro reglas y se quedan aquí, junto a su motivo. */
+  .card{background:rgba(24,24,27,.72)}
+  header{background:rgba(15,15,17,.55); border-bottom-color:rgba(63,63,70,.8)}
+  .vineta{background:radial-gradient(80% 60% at 50% 30%, rgba(255,255,255,.05), transparent 60%)}
+  canvas#particulas{mix-blend-mode:screen}
+  .hline::after,.vline::after{
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.20),transparent)}
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
@@ -78,7 +106,7 @@ header{position:absolute; left:0; right:0; top:0; display:flex; align-items:cent
 .marca-min{font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--z500)}
 .marca-min b{color:var(--z900); font-weight:600}
 .btn-contacto{display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 14px;
-  border-radius:8px; border:1px solid var(--z200); background:#fff; color:var(--z900);
+  border-radius:8px; border:1px solid var(--z200); background:var(--sup); color:var(--z900);
   font-size:14px; font-weight:500; text-decoration:none; transition:background .15s,border-color .15s}
 .btn-contacto:hover{background:var(--z100); border-color:var(--z300)}
 .btn-contacto svg{width:16px; height:16px}
@@ -109,7 +137,7 @@ header{position:absolute; left:0; right:0; top:0; display:flex; align-items:cent
 .rel{position:relative; display:flex; align-items:center}
 .rel > .ic{position:absolute; left:12px; width:16px; height:16px; color:var(--z400); pointer-events:none}
 .rel input{
-  width:100%; height:40px; border-radius:8px; border:1px solid var(--z200); background:#fff;
+  width:100%; height:40px; border-radius:8px; border:1px solid var(--z200); background:var(--sup);
   padding:8px 12px 8px 38px; font-family:inherit; font-size:14px; color:var(--z900);
   box-shadow:0 1px 2px rgba(9,9,11,.04); transition:border-color .15s, box-shadow .15s;
 }
@@ -128,7 +156,7 @@ svg{fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke
 .fila{display:flex; align-items:center; justify-content:space-between; gap:12px}
 .recordar{display:flex; align-items:center; gap:8px}
 .recordar input{appearance:none; -webkit-appearance:none; width:16px; height:16px; flex:none;
-  border:1px solid var(--z300); border-radius:4px; background:#fff; cursor:pointer;
+  border:1px solid var(--z300); border-radius:4px; background:var(--sup); cursor:pointer;
   display:grid; place-items:center; transition:background .15s, border-color .15s}
 .recordar input:checked{background:var(--z900); border-color:var(--z900)}
 .recordar input:checked::after{content:""; width:9px; height:5px; border:2px solid #fff;
@@ -335,6 +363,7 @@ def _marco(titulo, tarjeta, guiones=(), ancha=False, alto=False):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <meta name="theme-color" content="#FAFAFA">
+{render.FAVICON}
 <title>{e(titulo)} · RENTA IA</title><style>{ESTILO}</style></head><body>
 <section class="pantalla">
   <div class="vineta"></div>
@@ -383,7 +412,7 @@ def pagina(mensaje='', usuario='', registro_abierto=False, hecho=''):
     """La pantalla de acceso. `mensaje` se muestra como error si viene."""
     pie = ('¿No tiene cuenta?<b><a href="/registrarse" style="color:inherit">'
            'Regístrese aquí</a></b>' if registro_abierto else
-           '¿No tiene acceso?<b>Solicítelo al contador</b>')
+           '¿No tiene acceso?<b>Solicítelo al administrador</b>')
     tarjeta = f"""<form class="card" method="post" action="/entrar" id="f" novalidate>
       <div class="card-header">
         <h1>Bienvenido de nuevo</h1>
@@ -431,10 +460,10 @@ def pagina_registro(mensaje='', valores=None, min_clave=10, aprobacion=False):
     avisarle. Lo demás —rol y cupo— lo decide el sistema, nunca el formulario.
     """
     v = valores or {}
-    nota_final = ('Su cuenta quedará <b>a la espera de aprobación</b>: el contador '
-                  'la revisa y le avisa por correo.' if aprobacion else
+    nota_final = ('Su cuenta quedará <b>a la espera de aprobación</b>: el '
+                  'administrador la revisa y le avisa por correo.' if aprobacion else
                   'Podrá entrar de inmediato. El número de declaraciones que puede '
-                  'procesar lo fija el contador.')
+                  'procesar lo fija el administrador.')
     tarjeta = f"""<form class="card ancha" method="post" action="/registrarse" id="f" novalidate>
       <div class="card-header">
         <h1>Crear una cuenta</h1>

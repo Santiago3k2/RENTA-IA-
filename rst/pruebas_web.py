@@ -34,6 +34,7 @@ for sub in (RAIZ, os.path.join(RAIZ, 'generador'), os.path.join(RAIZ, 'web'),
 import cuentas                      # noqa: E402
 import db                           # noqa: E402
 import index as sitio               # noqa: E402
+import permisos as mod_permisos     # noqa: E402
 
 from rst import nube as rst_nube    # noqa: E402
 
@@ -135,6 +136,7 @@ def main():
     print(f'\nSitio levantado en {base}\n')
 
     ids = []
+    permisos_dados = []
     try:
         # ── sin sesión ────────────────────────────────────────────────
         anon = Navegador(base)
@@ -170,9 +172,22 @@ def main():
                 'el grupo de actividad no viene preseleccionado: define la tarifa')
 
         # ── un recibo ya cargado ──────────────────────────────────────
+        # Desde agosto de 2026 nadie ve lo que no cargó, ni el administrador.
+        # Para llegar al detalle de un recibo ajeno hay que pedirle permiso a
+        # su dueño; concederlo aquí prueba de paso el mecanismo entero.
         lista = rst_nube.listar(s)
         if lista:
             ref = lista[0]['ref']
+            dueno = lista[0]['fila'].get('creada_por') or 'admin'
+
+            code, html, _ = nav.get('/rst/' + ref)
+            revisar(code == 404,
+                    'sin permiso, un recibo ajeno no se abre ni siendo admin',
+                    f'dio {code}')
+
+            p = mod_permisos.Permisos(s)
+            p.conceder(dueno, ua, dias=1, por='pruebas')
+            permisos_dados.append((dueno, ua))
             code, html, _ = nav.get('/rst/' + ref)
             revisar(code == 200 and 'Casillas del Formulario 2593' in html,
                     'el detalle de un recibo carga', f'dio {code}')
@@ -194,9 +209,18 @@ def main():
                 f'dio {code}')
 
         # ── la ficha se valida antes de tocar el archivo ───────────────
+        # Sin la casilla del descargo no se genera nada: se comprueba antes
+        # que la ficha, porque es una condición y no una validación más.
+        sin_descargo = {'_t': t, 'nombre': 'ENSAYO SAS', 'nit': '900000000',
+                        'ano': '2026', 'bimestre': '3', 'grupo': '3',
+                        'municipio': 'Bucaramanga', 'tarifa_ica': '12,5'}
+        code, html, _ = nav.subir('/rst/subir', sin_descargo, 'x.xlsx', b'nada')
+        revisar('marcar la casilla' in html,
+                'sin aceptar el descargo no se procesa el consolidado')
+
         malos = {'_t': t, 'nombre': 'ENSAYO SAS', 'nit': '900000000', 'ano': '2026',
                  'bimestre': '9', 'grupo': '3', 'municipio': 'Bucaramanga',
-                 'tarifa_ica': '12,5'}
+                 'tarifa_ica': '12,5', 'descargo': '1'}
         code, html, _ = nav.subir('/rst/subir', malos, 'x.xlsx', b'no es un excel')
         revisar('bimestre debe ir de 1 a 6' in html,
                 'un bimestre fuera de rango se rechaza con un mensaje claro')
@@ -250,6 +274,11 @@ def main():
         code, _, _ = cli.subir('/rst/subir', {'_t': 'x'}, 'x.xlsx', b'x')
         revisar(code == 403, 'el cliente no puede subir un consolidado', f'dio {code}')
     finally:
+        for dueno, quien in permisos_dados:
+            try:
+                mod_permisos.Permisos(s).revocar(dueno, quien, por='pruebas')
+            except Exception:
+                pass
         servidor.shutdown()
         for i in ids:
             try:

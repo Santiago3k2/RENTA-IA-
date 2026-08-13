@@ -43,6 +43,10 @@ generador/
   sheet_*.py          una por hoja
   calculos.py         validador en Python puro (semáforo)
   casos.py            descubre los casos de clientes/ (lo usan la web y la nube)
+  legal.py            el descargo de responsabilidad, en un solo sitio
+  perfil.py           las cinco preguntas que la exógena no responde
+  permisos.py         quién puede ver la cartera de quién, y por cuánto tiempo
+  borradores.py       el paso intermedio de la carga: procesar sin comprometer
   config.py           lee el .env y diagnostica lo que falte
   db.py               Supabase: tablas + Storage, solo librería estándar
   cuentas.py          usuarios: contraseñas, roles, cupos, bitácora y ajustes
@@ -144,13 +148,49 @@ pantalla de acceso, y el administrador decide desde el panel qué puede hacer.
 
 | Rol | Ve | Cupo |
 |---|---|---|
-| **Administrador** | toda la cartera, y maneja las cuentas | sin límite |
-| **Contador** | toda la cartera | sin límite |
+| **Administrador** | **solo lo suyo**; maneja cuentas, cupos y ajustes | sin límite |
 | **Cliente** | solo lo que él mismo carga | el que le fije el administrador |
+
+Son dos y no tres: el rol «contador» desapareció en agosto de 2026 porque **quien
+usa el programa es el contador**. Un tercer rol solo servía para confundir.
+
+**Nadie ve una declaración que no cargó, ni el administrador.** Él administra la
+plataforma, pero las declaraciones de sus usuarios son datos tributarios de
+terceros sujetos a la reserva del art. 583 E.T. De la cartera ajena solo sabe
+**cuántos casos lleva cada cuenta** — el número, y nada más. Para entrar tiene
+que pedirle permiso a su dueño desde la ficha de la cuenta; el dueño concede por
+24 horas, 7 días o 30, y puede retirarlo antes desde «Mi cuenta». El permiso
+vence solo. Todo queda en la bitácora.
+
+Desde la consola, cuando haga falta habilitarlo sin que el dueño esté delante:
+
+```bash
+cd generador
+python permisos.py --ver
+python permisos.py --conceder <usuario> --a admin --dias 7
+python permisos.py --revocar  <usuario> --a admin
+```
 
 El **cupo** es cuántas declaraciones puede procesar esa cuenta en total. Se
 comprueba en el servidor, no ocultando el botón, y un cliente no puede
 sobrescribir un caso cargado por otro.
+
+**La carga va en dos pasos.** Al subir la exógena no se crea nada: el sistema la
+lee, la clasifica y muestra de quién es, de qué año y qué cifras darían. Solo al
+confirmar se crea la declaración y se cuenta el cupo. Equivocarse de archivo
+dejó de costar un cupo. Y **reprocesar un caso que ya tiene cargado no consume
+cupo nuevo** —reemplaza el que hay—, así que el cupo lleno no impide corregir un
+archivo equivocado, solo cargar un contribuyente nuevo.
+
+En ese mismo paso se preguntan **las cinco cosas que la exógena no trae**
+(casado, hijos, hipoteca, ICETEX, residencia) y el libro sale ya diligenciado.
+Son opcionales: lo que quede en blanco sale en blanco, como antes, y se anota
+una alerta informativa.
+
+Y se acepta el **descargo de responsabilidad**, que es obligatorio: sin la
+casilla marcada el servidor no genera. La aceptación queda en la bitácora con el
+usuario, el caso y la hora. El texto vive en `generador/legal.py`, en un solo
+sitio, y de ahí sale también el que va dentro de los libros de Excel.
 
 Una declaración **no se elimina desde ninguna parte del sitio**: ni su dueño ni
 el administrador pueden borrarla, y eliminar una cuenta conserva las suyas. El
@@ -163,8 +203,9 @@ El panel (`/admin`, solo para el rol administrador) tiene cinco secciones:
 - **Panel** — cuentas por aprobar, cuentas bloqueadas, cifras y últimos movimientos.
 - **Cuentas** — aprobar, inhabilitar, cambiar rol y cupo, editar datos,
   restablecer la contraseña, cerrar sesiones a distancia y eliminar.
-- **Declaraciones** — todas las de la plataforma, para consultarlas. No se
-  borran: ver arriba por qué.
+- **Uso** — cuántos casos lleva cada cuenta. Solo el número: ni un nombre de
+  contribuyente, ni una cédula, ni una cifra. Desde la ficha de cada cuenta se le
+  pide permiso a su dueño para entrar a su cartera.
 - **Bitácora** — quién entró, qué miró y qué borró, con la hora y la dirección IP.
 - **Ajustes** — abrir o cerrar el registro, exigir aprobación previa, fijar el
   cupo con el que nace una cuenta y poner un aviso en la bandeja. Cambian el
