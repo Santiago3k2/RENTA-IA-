@@ -27,27 +27,39 @@ casilla marcada el libro no se genera. Y queda anotada en la bitácora con el
 usuario, el caso y la hora — que es lo que convierte un aviso en un respaldo.
 """
 
-TITULO = 'Documento de trabajo · usted debe revisarlo antes de presentarlo'
+TITULO = 'ALERTA PROFESIONAL · REVISIÓN OBLIGATORIA ANTES DE PRESENTAR:'
 
 # Una línea. Para el pie de página y las cintas estrechas.
 CORTO = ('RENTA IA entrega un documento de trabajo, no una declaración lista '
          'para presentar: revise cada cifra antes de radicarla ante la DIAN.')
 
-# El párrafo completo. Es el que se acepta.
-LARGO = (
-    'RENTA IA arma esta liquidación de forma automática con la información '
-    'que la DIAN reporta en el archivo que usted cargó. <b>No es un formulario '
-    'oficial, no es una declaración presentada y no reemplaza el criterio '
-    'profesional de quien la firma.</b> La información exógena no recoge toda '
-    'la realidad económica del contribuyente: hay activos, ingresos, costos y '
-    'soportes que nadie le reporta a la DIAN, y hay partidas que llegan mal '
-    'clasificadas desde el tercero que las informó. '
-    '<b>Usted es responsable de revisar y validar cada cifra</b> contra los '
-    'soportes del contribuyente —certificados, extractos, escrituras, la '
-    'declaración del año anterior— y de resolver las alertas antes de '
-    'presentar. RENTA IA y quien lo desarrolla <b>no responden por errores, '
-    'omisiones, mayores impuestos, intereses ni sanciones</b> derivados de '
-    'presentar este documento sin revisarlo.')
+# El texto que se acepta, redactado por el titular de RENTA IA (13-ago-2026).
+# Va tal cual, palabra por palabra: es la declaración de alcance y de tratamiento
+# de datos del producto, no una glosa que se pueda reescribir por estilo. Lo
+# único que pone el programa son las negritas, que son formato y no contenido.
+PARRAFOS = (
+    'RENTA IA procesa automáticamente la información suministrada por el '
+    'usuario, generando un resultado preliminar con base en los datos '
+    'reportados en MUISCA – DIAN, como apoyo para la elaboración de la '
+    'declaración de renta. Si la información presenta errores, '
+    'inconsistencias, omisiones o una clasificación inadecuada, corresponde al '
+    'profesional identificar, analizar y realizar los ajustes que resulten '
+    'procedentes.',
+
+    'RENTA IA <b>no reemplaza el conocimiento, experiencia ni criterio '
+    'profesional del Contador Público</b>. Por ello, es indispensable que el '
+    'profesional analice, interprete, verifique y valide la información, '
+    'confrontándola con los respectivos soportes antes de presentar la '
+    'declaración.',
+
+    '<b>Protección de datos:</b> La información cargada en RENTA IA se utiliza '
+    'exclusivamente para su procesamiento dentro de la herramienta, bajo '
+    'medidas de seguridad y confidencialidad orientadas a proteger los datos '
+    'personales, financieros y tributarios suministrados.',
+)
+
+# El mismo texto seguido, para donde no caben tres párrafos.
+LARGO = ' '.join(PARRAFOS)
 
 # Lo que dice la casilla que hay que marcar.
 CASILLA = ('Entiendo que este es un documento de trabajo, que debo revisar la '
@@ -98,9 +110,14 @@ def aceptado(campos):
 
 
 def bloque(destacado=True):
-    """El descargo completo, para las pantallas donde hay que aceptarlo."""
+    """El descargo completo, para las pantallas donde hay que aceptarlo.
+
+    Los tres párrafos van separados y no corridos: el tercero es el de
+    protección de datos y dice algo distinto de los dos primeros.
+    """
     clase = 'descargo' + ('' if destacado else ' suave')
-    return (f'<div class="{clase}"><h3>{TITULO}</h3><p>{LARGO}</p></div>')
+    cuerpo = ''.join(f'<p>{p}</p>' for p in PARRAFOS)
+    return f'<div class="{clase}"><h3>{TITULO}</h3>{cuerpo}</div>'
 
 
 def casilla(marcada=False):
@@ -122,6 +139,7 @@ ESTILO = """
 background:var(--ambar-f);border-radius:11px;padding:16px 18px;margin:18px 0}
 .descargo h3{font-size:13.5px;color:var(--ambar-t);margin-bottom:7px}
 .descargo p{font-size:12.7px;color:var(--text2);line-height:1.6;max-width:88ch}
+.descargo p + p{margin-top:9px}
 .descargo b{color:var(--ink);font-weight:600}
 .descargo.suave{border-color:var(--bord);border-left-color:var(--z400);
 background:var(--z50)}
