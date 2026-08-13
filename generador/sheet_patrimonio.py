@@ -297,38 +297,28 @@ def build(wb, A, C, T):
     s.gap(5.0)
     # La comparación patrimonial del art. 236 E.T. se hace sobre patrimonio
     # LÍQUIDO, no bruto: lo que debe justificarse es el incremento del neto.
-    # De la exógena solo llega el bruto del año anterior, así que las deudas
-    # de ese año quedan como casilla abierta en vez de darlas por cero.
     r = s.datarow(h=20.5)
     s.txt(r, 'B', f'Patrimonio Líquido Declarado {ag}', 'G', sz=10.0, v='center')
     s.money(r, 'H', f'=H{A["pat_liq"]}', sz=10.0)
     liq_ag = r
+    # El patrimonio líquido del año anterior se toma DIRECTO de la casilla 31
+    # del formulario 210 presentado. Antes se reconstruía restándole al bruto
+    # unas deudas que había que teclear aparte: dos casillas para llegar a un
+    # dato que la declaración del año anterior ya trae calculado y firmado.
     r = s.datarow(zebra=True, h=20.5)
-    s.txt(r, 'B', f'Patrimonio Bruto Declarado {ant}  ·  renglón 29', 'G', sz=10.0, v='center')
+    s.txt(r, 'B', f'Patrimonio Líquido Declarado {ant}  ·  casilla 31 del Formulario 210',
+          'G', sz=10.0, b=True, v='center')
     s.mark_input(r, 'H')
-    s.money(r, 'H', C['patrimonio_bruto_anterior'], sz=10.0)
-    p24 = r
-    A['pat_2024'] = p24
-    ws[f'H{p24}'].comment = Comment(
-        f'NOTA 10 — Tome el patrimonio bruto del renglón 29 de la declaración\n'
-        f'del año gravable {ant}. La exógena lo informa como referencia\n'
-        f'({fmt_pesos(C["patrimonio_bruto_anterior"])}); confírmelo contra la declaración presentada.',
-        AUT, 300, 90)
-    r = s.datarow(h=20.5)
-    s.txt(r, 'B', f'(−) Deudas Declaradas {ant}  ·  renglón 30', 'G', sz=10.0, v='center')
-    s.mark_input(r, 'H')
-    s.money(r, 'H', None, sz=10.0)
-    deu24 = r
-    A['deudas_2024'] = deu24
-    ws[f'H{deu24}'].comment = Comment(
-        f'NOTA 10 — Renglón 30 de la declaración del año gravable {ant}.\n'
-        f'La exógena no lo informa: mientras esta casilla siga vacía, la\n'
-        f'conciliación compara contra el patrimonio BRUTO del año anterior\n'
-        f'y la diferencia queda sobrestimada.', AUT, 320, 100)
-    r = s.datarow(zebra=True, h=20.5)
-    s.txt(r, 'B', f'Patrimonio Líquido Declarado {ant}', 'G', sz=10.0, b=True, v='center')
-    s.money(r, 'H', f'=H{p24}-N(H{deu24})', sz=10.0, b=True)
+    s.money(r, 'H', None, sz=10.0, b=True)
     liq_ant = r
+    A['pat_liq_anterior'] = liq_ant
+    ws[f'H{liq_ant}'].comment = Comment(
+        f'NOTA 10 — Casilla 31 del formulario 210 del año gravable {ant}, tal\n'
+        f'como quedó presentado. Es el patrimonio LÍQUIDO, ya con las deudas\n'
+        f'restadas: no hay que volver a restarlas aquí.\n'
+        f'La exógena informa otra cosa —el patrimonio BRUTO del año anterior,\n'
+        f'{fmt_pesos(C["patrimonio_bruto_anterior"])}— que NO es esta casilla y por eso no se\n'
+        f'prediligencia: tómela de la declaración, no del reporte.', AUT, 350, 120)
     variacion = s.subtotal(f'(=) Variación patrimonial del año  ·  {ant} → {ag}',
                            f'=H{liq_ag}-H{liq_ant}', lab_col='B', val_col='H')
     s.gap()
@@ -393,7 +383,7 @@ def build(wb, A, C, T):
     s.txt(r, 'B', 'Diferencia Patrimonial Sin Justificar', 'G', sz=10.5, b=True, color=RED, v='center')
     s.money(r, 'H', f'=H{variacion}-H{justificada}', sz=11.5, b=True, color=RED, fmt=NUM)
     A['pat_dif'] = r
-    s.note(f'NOTA 10 — La comparación patrimonial del art. 236 E.T. se hace sobre el patrimonio líquido: enfrenta el reconstruido para {ag} —bruto menos deudas— contra el declarado en {ant}. Del año anterior la exógena solo informa el bruto, así que las deudas de {ant} quedan como casilla editable: tómelas del renglón 30 de esa declaración. Lo que la variación no explique con la renta gravable, los ingresos no constitutivos y el impuesto pagado queda aquí, en rojo: es renta líquida gravable por comparación patrimonial si no se justifica con la casilla de ajuste de capital.', h=38.0)
+    s.note(f'NOTA 10 — La comparación patrimonial del art. 236 E.T. se hace sobre el patrimonio líquido: enfrenta el reconstruido para {ag} —bruto menos deudas— contra el que quedó declarado en la casilla 31 del formulario 210 de {ant}. Esa casilla se digita de la declaración presentada y no de la exógena, que solo informa el patrimonio bruto. Lo que la variación no explique con la renta gravable, los ingresos no constitutivos y el impuesto pagado queda aquí, en rojo: es renta líquida gravable por comparación patrimonial si no se justifica con la casilla de ajuste de capital.', h=38.0)
     s.gap()
     if T.get('callout_brecha'):
         titulo, cuerpo = T['callout_brecha']

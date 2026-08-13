@@ -168,7 +168,14 @@ def populate(wb, A, C, T):
             ('E', None, 'Tope en pesos', 'right'), ('F', None, 'Valor del contribuyente', 'right'),
             ('G', None, 'Resultado', 'center'), ('H', 'I', 'Referencia', 'left')])
     causales = [
-        (f'Patrimonio bruto a 31-dic-{ant}', 4500, f'={PAT}!H{A["pat_2024"]}', 'Art. 592 E.T.'),
+        # Apunta al patrimonio bruto RECONSTRUIDO del año que se declara, no al
+        # del año anterior. Antes citaba la casilla del año anterior de la
+        # conciliación —que además ya no existe, ahora se digita la casilla 31
+        # del 210 y esa es líquida—, y el art. 592 num. 1 mide el patrimonio
+        # bruto «en el último día del año o período gravable»: para el AG {ag},
+        # el 31-dic-{ag}. Con la UVT de {ag} en la misma fila, ahora sí es
+        # coherente.
+        (f'Patrimonio bruto a 31-dic-{ag}', 4500, f'={PAT}!H{A["pat_bruto"]}', 'Art. 592 E.T.'),
         ('Ingresos brutos del período', 1400, f'={ING}!G{A["ing_total"]}', 'Art. 592 E.T.'),
         ('Consignaciones, depósitos e inversiones', 1400, f'={CONS}!G{A["mov_tope4"]}', 'Decreto de plazos'),
         ('Consumos con tarjeta de crédito', 1400, f'={CONS}!E{A["consumos"]}', 'Decreto de plazos'),
