@@ -251,7 +251,7 @@ def build(wb, A, C, T):
     s.note('NOTA 13 — El tope del 60% se calcula sobre los ingresos de cada subcédula por separado; esta línea es solo una referencia agregada.')
     s.gap(); s.gap()
 
-    # ══════════════ DE LOS INGRESOS AL IMPUESTO NETO ══════════════
+    # ══════════════ LIQUIDACIÓN PRIVADA ══════════════
     # Las tres subcédulas se depuran arriba por separado —esa separación es la
     # regla del libro y no se toca— pero el contribuyente necesita ver en una
     # sola columna qué le descontaron y con qué se queda. Esto es esa columna.
@@ -260,7 +260,7 @@ def build(wb, A, C, T):
     # DEFINIDO: esta hoja se arma antes que aquella, así que no puede citar sus
     # filas. La ventaja de fondo es que son literalmente la misma celda, de
     # modo que las dos hojas no pueden decir cifras distintas.
-    s.section('DE LOS INGRESOS AL IMPUESTO NETO DE RENTA')
+    s.section('LIQUIDACIÓN PRIVADA')
     s.head([('B', 'F', 'Concepto', 'left'), ('G', None, 'Valor', 'right')])
 
     def escalon(etiqueta, formula, zebra=False, b=False, color=TEXT):
