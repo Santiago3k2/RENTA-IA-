@@ -152,44 +152,41 @@ def build(wb, A, C, T):
     s.head([('B', 'C', 'Concepto', 'left'), ('D', 'F', 'Referencia normativa', 'left'),
             ('G', None, 'Valor', 'right')])
     # ── Componente inflacionario de los rendimientos financieros ──
-    # Va en dos líneas y no en una: primero QUÉ rendimientos entran a la base
-    # —sumando las filas de arriba, a la vista— y después el porcentaje del
-    # año aplicado sobre esa base. Así el contador ve de dónde sale la cifra y
-    # puede corregir la base si un certificado dice otra cosa; el porcentaje
-    # es el del decreto y no se toca.
+    # Una sola línea: el porcentaje del decreto aplicado sobre las partidas de
+    # R58 que el prevalidador marcó con R59, sumadas dentro de la propia
+    # fórmula. La fila de base que había aquí se quitó por redundante —el
+    # detalle ya está arriba, partida por partida— pero la casilla queda crema:
+    # trae la fórmula prediligenciada y admite que se sobrescriba si el
+    # certificado obliga a otra cifra.
     ci = inflacionario.calcular(C)
+    r = s.datarow()
     if ci['porcentaje']:
         rf = [filas_cap[i] for i in ci['indices'] if i < len(filas_cap)]
-        r = s.datarow()
-        s.txt(r, 'B', 'Rendimientos financieros incluidos en R58 — base del componente inflacionario', 'C')
-        s.txt(r, 'D', 'CDT, cuentas de ahorro y carteras colectivas. Los arrendamientos y los ingresos de mandato de esta misma cédula no tienen componente inflacionario', 'F', sz=8.0, i=True, color=MUTED)
-        s.mark_input(r, 'G')
-        s.money(r, 'G', ('=' + '+'.join(f'G{x}' for x in rf)) if rf else 0)
-        A['base_ci'] = r
         pct = ci['porcentaje']
         # 0.5543 → «55,43», con coma decimal: el libro es para leerlo en español.
         etiqueta = ('%.2f' % (pct * 100)).replace('.', ',')
-        r = s.datarow(zebra=True)
         s.txt(r, 'B', 'R59 · Ingresos no constitutivos de renta — componente '
                       'inflacionario (%s%%)' % etiqueta, 'C')
-        s.txt(r, 'D', f'Art. 38 E.T. — porcentaje fijado por decreto para el año gravable {C["ano_gravable"]}', 'F', sz=8.0, i=True, color=MUTED)
-        s.money(r, 'G', f'=ROUND(G{A["base_ci"]}*{pct},0)')
+        s.txt(r, 'D', 'Art. 38 E.T. — %s%% de los rendimientos financieros que el prevalidador '
+                      'marcó con R59; porcentaje fijado por decreto para el año gravable %s'
+                      % (etiqueta, C['ano_gravable']), 'F', sz=8.0, i=True, color=MUTED)
+        s.mark_input(r, 'G')
+        s.money(r, 'G', ('=ROUND((%s)*%s,0)' % ('+'.join(f'G{x}' for x in rf), pct))
+                        if rf else 0)
         ws[f'G{r}'].comment = Comment(
-            'Se calcula solo: base de rendimientos financieros × %s%%.\n'
-            'El porcentaje lo fija el Gobierno por decreto cada año y está\n'
-            'codificado en generador\\inflacionario.py. Si necesita otra cifra,\n'
-            'corrija la BASE de la fila de arriba (casilla crema) y esta se\n'
-            'recalcula sola.' % etiqueta, AUT, 330, 100)
+            'Se calcula solo: los rendimientos financieros de la lista de arriba\n'
+            'que la DIAN marcó con R59, por %s%%. El porcentaje lo fija el\n'
+            'Gobierno por decreto cada año y está en generador\\inflacionario.py.\n'
+            'La casilla es editable: si el certificado obliga a otra cifra,\n'
+            'escríbala encima y el resto del libro se recalcula.' % etiqueta,
+            AUT, 340, 110)
     else:
         # Año sin decreto cargado: casilla abierta y en cero, como antes.
-        r = s.datarow()
         s.txt(r, 'B', 'R59 · Ingresos no constitutivos de renta — componente inflacionario', 'C')
         s.txt(r, 'D', 'Art. 38 E.T. — porcentaje fijado por decreto reglamentario; se liquida en cero mientras no esté publicado', 'F', sz=8.0, i=True, color=MUTED)
         s.mark_input(r, 'G'); s.money(r, 'G', 0)
     A['incr58'] = r
-    # El rayado sigue alternando: con componente inflacionario van dos filas
-    # antes de esta, sin él va una sola.
-    r = s.datarow(zebra=not ci['porcentaje'])
+    r = s.datarow(zebra=True)
     s.txt(r, 'B', 'R67 · Costos y deducciones procedentes', 'C')
     s.txt(r, 'D', 'Art. 339 E.T. — comisión de administración inmobiliaria, predial, seguros, reparaciones y depreciación de los inmuebles arrendados', 'F', sz=8.0, i=True, color=MUTED)
     s.mark_input(r, 'G'); s.money(r, 'G', 0)
@@ -197,9 +194,11 @@ def build(wb, A, C, T):
     ws[f'G{r}'].comment = Comment(
         'NOTA 13 — Casilla editable para los costos y deducciones procedentes\n'
         'de esta subcédula. No deben superar el tope del 60% que aparece abajo.', AUT, 300, 70)
-    s.note('NOTA 13 — El componente inflacionario de los rendimientos financieros (art. 38 E.T.) se calcula solo sobre la base de rendimientos de arriba; los costos y deducciones (art. 339 E.T.) siguen abiertos porque no se informan en la exógena y son plenamente procedentes con certificado.'
+    A['dep_cap'] = s.subtotal('Total depuración de las rentas de capital',
+                              f'=G{A["incr58"]}+G{A["costos58"]}')
+    s.note('NOTA 13 — El componente inflacionario de los rendimientos financieros (art. 38 E.T.) se calcula solo sobre las partidas que el prevalidador marcó con R59; los costos y deducciones (art. 339 E.T.) siguen abiertos porque no se informan en la exógena y son plenamente procedentes con certificado. El total es lo que se resta del R58 en la hoja 6.'
            if ci['porcentaje'] else
-           'NOTA 13 — Las rentas de capital admiten ingresos no constitutivos de renta y costos y deducciones procedentes (art. 339 E.T.). Diligéncielos con los soportes: no se informan en la exógena y son plenamente procedentes con certificado.', h=22.0)
+           'NOTA 13 — Las rentas de capital admiten ingresos no constitutivos de renta y costos y deducciones procedentes (art. 339 E.T.). Diligéncielos con los soportes: no se informan en la exógena y son plenamente procedentes con certificado. El total es lo que se resta del R58 en la hoja 6.', h=22.0)
     A['tope60_cap'] = tope60('las rentas de capital', A['r58'])
     s.gap()
 
@@ -250,6 +249,47 @@ def build(wb, A, C, T):
     s.txt(r, 'B', 'Referencia · 60% del total de la cédula general', 'F', sz=8.6, i=True, color=MUTED)
     s.money(r, 'G', f'=ROUND(G{A["ing_total"]}*0.6,0)', sz=9.2, b=True, color=GOLD)
     s.note('NOTA 13 — El tope del 60% se calcula sobre los ingresos de cada subcédula por separado; esta línea es solo una referencia agregada.')
+    s.gap(); s.gap()
+
+    # ══════════════ DE LOS INGRESOS AL IMPUESTO NETO ══════════════
+    # Las tres subcédulas se depuran arriba por separado —esa separación es la
+    # regla del libro y no se toca— pero el contribuyente necesita ver en una
+    # sola columna qué le descontaron y con qué se queda. Esto es esa columna.
+    #
+    # Los cinco escalones de abajo del subtotal salen de la hoja 6 POR NOMBRE
+    # DEFINIDO: esta hoja se arma antes que aquella, así que no puede citar sus
+    # filas. La ventaja de fondo es que son literalmente la misma celda, de
+    # modo que las dos hojas no pueden decir cifras distintas.
+    s.section('DE LOS INGRESOS AL IMPUESTO NETO DE RENTA')
+    s.head([('B', 'F', 'Concepto', 'left'), ('G', None, 'Valor', 'right')])
+
+    def escalon(etiqueta, formula, zebra=False, b=False, color=TEXT):
+        f = s.datarow(zebra=zebra, h=19.5)
+        s.txt(f, 'B', etiqueta, 'F', sz=9.4, b=b, color=color, v='center')
+        s.money(f, 'G', formula, sz=9.6, b=b, color=color)
+        return f
+
+    e_ing = escalon('Ingresos brutos de la cédula general', f'=G{A["ing_total"]}', b=True)
+    e_inc = escalon('(−) Ingresos no constitutivos de renta  ·  R33 + R59 + no laborales',
+                    f'=-(G{A["r33"]}+G{A["incr58"]}+G{A["incr74"]})', zebra=True)
+    e_cos = escalon('(−) Costos y deducciones procedentes  ·  arts. 339 y 341 E.T.',
+                    f'=-(G{A["costos58"]}+G{A["costos74"]})')
+    e_exe = escalon('(−) Rentas exentas y deducciones imputables aceptadas  ·  límite del 40%',
+                    '=EXENTAS_ACEPTADAS', zebra=True)
+    e_ded = escalon('(−) Deducciones no sujetas al límite  ·  1% factura electrónica y dependientes',
+                    '=DEDUC_SIN_LIMITE')
+    e_rlg = s.subtotal('(=) Renta líquida gravable de la cédula general',
+                       f'=SUM(G{e_ing}:G{e_ded})')
+    ws[f'G{e_rlg}'].comment = Comment(
+        'Tiene que coincidir con la renta líquida gravable de la hoja 6.\n'
+        'Aquí se llega sumando los escalones de arriba y allá por la\n'
+        'depuración separada de cada subcédula: son dos caminos al mismo\n'
+        'número, y que coincidan es la comprobación.', AUT, 330, 90)
+    e_imp = escalon('Impuesto sobre la renta líquida gravable  ·  art. 241 E.T.',
+                    '=IMPUESTO_RENTA', zebra=True)
+    escalon('(−) Descuentos tributarios', '=-DESCUENTOS_TRIB')
+    A['imp_neto_ing'] = s.hero('IMPUESTO NETO DE RENTA', '=IMPUESTO_NETO')
+    s.note('NOTA 13 — Este bloque no liquida nada: reúne en una sola columna lo que ya se depuró por separado en cada subcédula y lo que la hoja 6 imputa dentro del límite del 40%. Sirve para ver de un vistazo cuánto de los ingresos brutos quedó gravado y cuánto se descontó legalmente. Las cifras son las mismas celdas de la hoja 6, no una copia.', h=29.25)
 
     ws.freeze_panes = 'A6'
     return ws

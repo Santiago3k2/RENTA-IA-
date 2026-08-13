@@ -79,6 +79,15 @@ def construir(C, T):
         'RETENCIONES':        ('4. Retenciones', 'D', A['ret_total']),
         'RENTA_LIQ_GRAVABLE': ('6. Liquidación', 'D', A['rlg']),
         'IMPUESTO_A_CARGO':   ('6. Liquidación', 'D', A['imp_cargo']),
+        # Los cuatro escalones que van entre la renta líquida y el impuesto
+        # neto. El consolidado de la hoja 3 los cita por nombre porque esa hoja
+        # se arma antes que la 6 — y así las dos no pueden decir cifras
+        # distintas: son literalmente la misma celda.
+        'EXENTAS_ACEPTADAS':  ('6. Liquidación', 'D', A['exentas_aceptadas']),
+        'DEDUC_SIN_LIMITE':   ('6. Liquidación', 'D', A['ded_sin_limite']),
+        'IMPUESTO_RENTA':     ('6. Liquidación', 'D', A['imp_241']),
+        'DESCUENTOS_TRIB':    ('6. Liquidación', 'D', A['descuentos']),
+        'IMPUESTO_NETO':      ('6. Liquidación', 'D', A['imp_neto']),
         'ANTICIPO':           ('5. Anticipo', 'I', A['ant_row']),
         'SALDO_A_PAGAR':      ('5. Anticipo', 'I', A['saldo_row']),
         'TOPE4_MOVIMIENTOS':  ('8. Consignaciones', 'G', A['mov_tope4']),

@@ -137,6 +137,7 @@ def build(wb, A, C, T):
               h=28.95, color=GREEN)
     d5 = total('(−) Rentas exentas y deducciones imputables aceptadas',
                f'=-MIN(D{d2},D{d1})', TEAL, TEAL_T)
+    A['exentas_aceptadas'] = d5
     s.gap()
 
     # ══════════════ E · DEDUCCIONES NO SUJETAS AL LÍMITE ══════════════
@@ -154,6 +155,7 @@ def build(wb, A, C, T):
         'dependientes: 72 UVT por dependiente (máximo cuatro).\n'
         'No está sujeta al límite del 40%.', AUT, 300, 80)
     e3 = total('(−) Total deducciones no sujetas al límite', f'=-SUM(D{e1}:D{e2})', TEAL, TEAL_T)
+    A['ded_sin_limite'] = e3
     s.gap()
 
     # ══════════════ F · UNIFICACIÓN ══════════════
@@ -176,9 +178,11 @@ def build(wb, A, C, T):
               f'(D{f6}-31000)*0.39+10352))))))*{UVT}/1000,0)*1000',
               'Tarifa marginal aplicada según la tabla del final de la hoja; el resultado se aproxima al múltiplo de mil más cercano (art. 577 E.T.).',
               zebra=True, h=28.95)
+    A['imp_241'] = f7
     f8 = line('—', '(−) Descuentos tributarios', 0,
               'Donaciones (art. 257), impuestos pagados en el exterior (art. 254) u otros descuentos. No se informan en la exógena.',
               h=28.95, inp=True)
+    A['descuentos'] = f8
     f9 = total('Impuesto neto de renta', f'=D{f7}-D{f8}', TEAL, TEAL_T)
     A['imp_neto'] = f9
     f10 = line('—', '(+) Impuesto de ganancias ocasionales', 0,
