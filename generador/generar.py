@@ -70,6 +70,12 @@ def construir(C, T):
         'PATRIMONIO_LIQUIDO': ('2. Patrimonio', 'H', A['pat_liq']),
         'DIFERENCIA_PATRIM':  ('2. Patrimonio', 'H', A['pat_dif']),
         'INGRESOS_BRUTOS':    ('3. Ingresos', 'G', A['ing_total']),
+        # Los tres INCRNGO por separado: la conciliación patrimonial de la hoja 2
+        # los suma, y esa hoja se arma ANTES que la 3, así que no puede citar sus
+        # filas — solo el nombre, que Excel resuelve al abrir.
+        'INCRNGO_TRABAJO':    ('3. Ingresos', 'G', A['r33']),
+        'INCRNGO_CAPITAL':    ('3. Ingresos', 'G', A['incr58']),
+        'INCRNGO_NO_LABORAL': ('3. Ingresos', 'G', A['incr74']),
         'RETENCIONES':        ('4. Retenciones', 'D', A['ret_total']),
         'RENTA_LIQ_GRAVABLE': ('6. Liquidación', 'D', A['rlg']),
         'IMPUESTO_A_CARGO':   ('6. Liquidación', 'D', A['imp_cargo']),

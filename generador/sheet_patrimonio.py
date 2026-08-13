@@ -329,11 +329,71 @@ def build(wb, A, C, T):
     s.txt(r, 'B', f'Patrimonio Líquido Declarado {ant}', 'G', sz=10.0, b=True, v='center')
     s.money(r, 'H', f'=H{p24}-N(H{deu24})', sz=10.0, b=True)
     liq_ant = r
+    variacion = s.subtotal(f'(=) Variación patrimonial del año  ·  {ant} → {ag}',
+                           f'=H{liq_ag}-H{liq_ant}', lab_col='B', val_col='H')
+    s.gap()
+
+    # ── Con qué se justifica esa variación ──────────────────────────────
+    # El patrimonio solo puede haber crecido con lo que entró y no se gastó en
+    # impuestos: la renta gravable del año, más lo que entró sin ser renta
+    # (los INCRNGO), menos el impuesto que se pagó. Lo que no cuadre con eso es
+    # lo que la DIAN pregunta.
+    #
+    # Las tres cifras vienen por NOMBRE DEFINIDO y no por referencia de celda:
+    # esta hoja se arma antes que la de liquidación y la de ingresos, así que
+    # sus filas todavía no existen. Los nombres se resuelven al abrir el libro
+    # (se declaran al final de generar.py) y además sobreviven a que cualquiera
+    # de esas hojas cambie de tamaño.
+    s.section('JUSTIFICACIÓN DE LA VARIACIÓN PATRIMONIAL')
+    s.head([('B', 'G', 'Concepto', 'left'), ('H', None, 'Valor', 'right')])
+    r = s.datarow(h=20.5)
+    s.txt(r, 'B', f'(+) Renta líquida gravable {ag}', 'G', sz=10.0, v='center')
+    s.money(r, 'H', '=RENTA_LIQ_GRAVABLE', sz=10.0)
+    j_rlg = r
+    r = s.datarow(zebra=True, h=20.5)
+    s.txt(r, 'B', '(+) Ingresos no constitutivos de renta  ·  R33 + R59 + no laborales',
+          'G', sz=10.0, v='center')
+    s.money(r, 'H', '=INCRNGO_TRABAJO+INCRNGO_CAPITAL+INCRNGO_NO_LABORAL', sz=10.0)
+    j_incr = r
+    ws[f'H{j_incr}'].comment = Comment(
+        'NOTA 10 — Entraron al patrimonio pero no pagaron impuesto: aportes\n'
+        'obligatorios a salud y pensión (R33), componente inflacionario de los\n'
+        'rendimientos financieros (R59) y los no constitutivos de las rentas no\n'
+        'laborales. Se toman de la hoja 3 y se actualizan solos.', AUT, 330, 90)
+    r = s.datarow(h=20.5)
+    s.txt(r, 'B', f'(−) Impuesto de renta pagado durante {ag}', 'G', sz=10.0, v='center')
+    s.mark_input(r, 'H')
+    s.money(r, 'H', None, sz=10.0)
+    j_imp = r
+    ws[f'H{j_imp}'].comment = Comment(
+        f'NOTA 10 — Lo efectivamente pagado por impuesto de renta durante {ag}:\n'
+        f'el saldo a pagar de la declaración del año anterior más los anticipos.\n'
+        f'Salió del patrimonio sin ser un gasto de renta, así que justifica que\n'
+        f'el patrimonio no haya crecido tanto. Escríbalo en positivo: la fórmula\n'
+        f'ya lo resta.', AUT, 340, 100)
+    r = s.datarow(zebra=True, h=20.5)
+    s.txt(r, 'B', '(±) Ajuste de capital', 'G', sz=10.0, v='center')
+    s.mark_input(r, 'H')
+    s.money(r, 'H', None, sz=10.0)
+    j_aj = r
+    A['ajuste_capital'] = j_aj
+    ws[f'H{j_aj}'].comment = Comment(
+        'NOTA 10 — Casilla abierta para todo lo demás que mueve el patrimonio\n'
+        'sin pasar por la renta del año: rentas exentas, ganancias ocasionales,\n'
+        'herencias y donaciones recibidas, gastos personales de subsistencia\n'
+        '(en negativo), valorizaciones y correcciones de avalúo. Escriba el\n'
+        'neto, positivo o negativo, y deje la explicación por escrito: es\n'
+        'exactamente lo que se pregunta en un requerimiento.', AUT, 350, 120)
+    justificada = s.subtotal('(=) Variación patrimonial justificada',
+                             f'=H{j_rlg}+H{j_incr}-N(H{j_imp})+N(H{j_aj})',
+                             lab_col='B', val_col='H')
+    s.gap()
+
     r = s.datarow(h=22.0)
     s.txt(r, 'B', 'Diferencia Patrimonial Sin Justificar', 'G', sz=10.5, b=True, color=RED, v='center')
-    s.money(r, 'H', f'=H{liq_ag}-H{liq_ant}', sz=11.5, b=True, color=RED, fmt=NUM)
+    s.money(r, 'H', f'=H{variacion}-H{justificada}', sz=11.5, b=True, color=RED, fmt=NUM)
     A['pat_dif'] = r
-    s.note(f'NOTA 10 — La comparación patrimonial del art. 236 E.T. se hace sobre el patrimonio líquido: enfrenta el reconstruido para {ag} —bruto menos deudas— contra el declarado en {ant}. Del año anterior la exógena solo informa el bruto, así que las deudas de {ant} quedan como casilla editable: tómelas del renglón 30 de esa declaración. La diferencia se muestra en rojo y entre paréntesis cuando es negativa.', h=29.25)
+    s.note(f'NOTA 10 — La comparación patrimonial del art. 236 E.T. se hace sobre el patrimonio líquido: enfrenta el reconstruido para {ag} —bruto menos deudas— contra el declarado en {ant}. Del año anterior la exógena solo informa el bruto, así que las deudas de {ant} quedan como casilla editable: tómelas del renglón 30 de esa declaración. Lo que la variación no explique con la renta gravable, los ingresos no constitutivos y el impuesto pagado queda aquí, en rojo: es renta líquida gravable por comparación patrimonial si no se justifica con la casilla de ajuste de capital.', h=38.0)
     s.gap()
     if T.get('callout_brecha'):
         titulo, cuerpo = T['callout_brecha']
