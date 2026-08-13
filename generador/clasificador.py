@@ -9,6 +9,7 @@ registro no encaja en ninguna regla NO se inventa un destino: queda como
 import re
 from collections import defaultdict
 
+import inflacionario
 from parser_exogena import norm
 
 UVT_POR_ANO = {
@@ -265,6 +266,17 @@ def procesar(parsed):
                      if 'cesantia' in norm(c)]
     incrngo = partidas('incrngo')
     rentas_capital = partidas('r58')
+    # El prevalidador dice cuáles rentas de capital llevan R59. Su columna de uso
+    # sugerido reza, para un CDT: «Tope 1: Ingresos brutos | R58 Ingresos brutos
+    # por rentas de capital | R59 Ingresos no constitutivos por rentas de
+    # capital». No dice cuánto —el porcentaje lo fija un decreto, ver
+    # `inflacionario.py`— pero sí CUÁLES, y esa señal vale más que adivinar por
+    # el texto. La diferencia es real y no teórica: en un mismo pagador la DIAN
+    # marca los CDT (concepto 1020) y NO marca el concepto 5063, «intereses y
+    # rendimientos financieros pagados». Distingue por concepto, y su tabla de
+    # conceptos es la que manda a la hora de declarar.
+    idx_incr_cap = [i for i, r in enumerate(vivos('r58'))
+                    if _tiene(norm(r.uso), 'r59')]
     rentas_no_laborales = partidas('r74')
 
     # ═══════════ RETENCIONES agrupadas por concepto ═══════════
@@ -384,6 +396,18 @@ def procesar(parsed):
                        ' · '.join(f'{r.reportante}: ${r.valor:,.0f}'.replace(',', '.') for r in recup)
                        + f'. Total {sum(r.valor for r in recup):,.0f}.'.replace(',', '.'),
                        'El motor de topes de la DIAN no los suma al tope 1, así que quedaron fuera del ingreso corriente. Los arts. 195 a 198 E.T. pueden hacerlos renta líquida por recuperación de deducciones: evaluar si en años anteriores se dedujo el costo que ahora se recupera.'))
+    # Rendimientos que parecen financieros por su texto pero que la DIAN NO
+    # marcó con R59. Se dejan FUERA de la base —manda la sugerencia— y se avisa,
+    # porque la decisión final es del contador y la casilla del libro está
+    # abierta para ampliarla.
+    dudosos = [r for i, r in enumerate(vivos('r58'))
+               if i not in idx_incr_cap and inflacionario.es_rendimiento_financiero(r.detalle)]
+    if dudosos and idx_incr_cap:
+        avisos.append(('MEDIA', 'Rendimientos sin componente inflacionario sugerido por la DIAN',
+                       ' · '.join(f'{r.reportante}: {r.detalle} (${r.valor:,.0f})'.replace(',', '.')
+                                  for r in dudosos[:4])
+                       + f'. Total {sum(r.valor for r in dudosos):,.0f}.'.replace(',', '.'),
+                       'Su texto dice rendimientos, pero el prevalidador no los marcó con R59 y por eso quedaron FUERA de la base del componente inflacionario. La DIAN distingue por concepto —del mismo pagador marca los CDT del concepto 1020 y no los del 5063—. Si a su juicio el art. 38 E.T. sí aplica, amplíe la base en la casilla crema de la hoja 3 y el R59 se recalcula solo.'))
     if not retenciones:
         avisos.append(('MEDIA', 'No hay ninguna retención informada en la exógena',
                        'El renglón R132 quedaría en cero.',
@@ -421,6 +445,7 @@ def procesar(parsed):
         'vehiculos': vehiculos, 'pasivos': pasivos,
         'rentas_trabajo': rentas_trabajo, 'indices_cesantias_exentas': idx_cesantias,
         'incrngo_trabajo': incrngo, 'rentas_capital': rentas_capital,
+        'indices_incrngo_capital': idx_incr_cap,
         'rentas_no_laborales': rentas_no_laborales, 'base_25_excluir': base_25_excluir,
         'retenciones': retenciones, 'movimientos': movimientos,
         'movimientos_excluidos': movimientos_excl, 'consumos_tarjeta': consumos,

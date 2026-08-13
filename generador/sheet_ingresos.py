@@ -4,6 +4,8 @@ from openpyxl.comments import Comment
 from openpyxl.formatting.rule import FormulaRule
 from build_lib import *
 
+import inflacionario
+
 AUT = 'Generador renta'
 
 
@@ -24,7 +26,14 @@ def build(wb, A, C, T):
             ('D', None, 'Reportado', 'right'), ('E', None, 'Certificado', 'right'),
             ('F', None, 'Diferencia', 'right'), ('G', None, 'Ingreso', 'right')]
 
-    def partidas(rows):
+    def partidas(rows, filas=None):
+        """Pinta las partidas de una subcédula. Devuelve (primera, última) fila.
+
+        `filas`, si se pasa, recibe la fila en que quedó cada partida. Lo usa el
+        componente inflacionario para sumar exactamente las de rendimientos
+        financieros: sin eso habría que pegar un total, y en este libro todo
+        total es fórmula.
+        """
         r0 = s.r
         if not rows:
             r = s.datarow(h=20.0)
@@ -40,6 +49,8 @@ def build(wb, A, C, T):
             s.money(r, 'E', val)
             s.money(r, 'F', f'=E{r}-D{r}', color=MUTED)
             s.money(r, 'G', f'=D{r}')
+            if filas is not None:
+                filas.append(r)
         r1 = s.r - 1
         ws.conditional_formatting.add(
             f'F{r0}:F{r1}',
@@ -130,7 +141,8 @@ def build(wb, A, C, T):
     # ══════════════ RENTAS DE CAPITAL — R58 ══════════════
     s.section('RENTAS DE CAPITAL — R58 (ART. 338 E.T.)')
     s.head(HEAD)
-    c0, c1 = partidas(C['rentas_capital'])
+    filas_cap = []
+    c0, c1 = partidas(C['rentas_capital'], filas_cap)
     if T.get('nota_capital'):
         s.note(T['nota_capital'], h=29.25)
     A['r58'] = s.subtotal('Subtotal rentas de capital (R58)', f'=SUM(G{c0}:G{c1})')
@@ -139,12 +151,45 @@ def build(wb, A, C, T):
     s.section('DEPURACIÓN DE LAS RENTAS DE CAPITAL')
     s.head([('B', 'C', 'Concepto', 'left'), ('D', 'F', 'Referencia normativa', 'left'),
             ('G', None, 'Valor', 'right')])
-    r = s.datarow()
-    s.txt(r, 'B', 'R59 · Ingresos no constitutivos de renta — componente inflacionario', 'C')
-    s.txt(r, 'D', 'Art. 38 E.T. — porcentaje fijado por decreto reglamentario; se liquida en cero mientras no esté publicado', 'F', sz=8.0, i=True, color=MUTED)
-    s.mark_input(r, 'G'); s.money(r, 'G', 0)
+    # ── Componente inflacionario de los rendimientos financieros ──
+    # Va en dos líneas y no en una: primero QUÉ rendimientos entran a la base
+    # —sumando las filas de arriba, a la vista— y después el porcentaje del
+    # año aplicado sobre esa base. Así el contador ve de dónde sale la cifra y
+    # puede corregir la base si un certificado dice otra cosa; el porcentaje
+    # es el del decreto y no se toca.
+    ci = inflacionario.calcular(C)
+    if ci['porcentaje']:
+        rf = [filas_cap[i] for i in ci['indices'] if i < len(filas_cap)]
+        r = s.datarow()
+        s.txt(r, 'B', 'Rendimientos financieros incluidos en R58 — base del componente inflacionario', 'C')
+        s.txt(r, 'D', 'CDT, cuentas de ahorro y carteras colectivas. Los arrendamientos y los ingresos de mandato de esta misma cédula no tienen componente inflacionario', 'F', sz=8.0, i=True, color=MUTED)
+        s.mark_input(r, 'G')
+        s.money(r, 'G', ('=' + '+'.join(f'G{x}' for x in rf)) if rf else 0)
+        A['base_ci'] = r
+        pct = ci['porcentaje']
+        # 0.5543 → «55,43», con coma decimal: el libro es para leerlo en español.
+        etiqueta = ('%.2f' % (pct * 100)).replace('.', ',')
+        r = s.datarow(zebra=True)
+        s.txt(r, 'B', 'R59 · Ingresos no constitutivos de renta — componente '
+                      'inflacionario (%s%%)' % etiqueta, 'C')
+        s.txt(r, 'D', f'Art. 38 E.T. — porcentaje fijado por decreto para el año gravable {C["ano_gravable"]}', 'F', sz=8.0, i=True, color=MUTED)
+        s.money(r, 'G', f'=ROUND(G{A["base_ci"]}*{pct},0)')
+        ws[f'G{r}'].comment = Comment(
+            'Se calcula solo: base de rendimientos financieros × %s%%.\n'
+            'El porcentaje lo fija el Gobierno por decreto cada año y está\n'
+            'codificado en generador\\inflacionario.py. Si necesita otra cifra,\n'
+            'corrija la BASE de la fila de arriba (casilla crema) y esta se\n'
+            'recalcula sola.' % etiqueta, AUT, 330, 100)
+    else:
+        # Año sin decreto cargado: casilla abierta y en cero, como antes.
+        r = s.datarow()
+        s.txt(r, 'B', 'R59 · Ingresos no constitutivos de renta — componente inflacionario', 'C')
+        s.txt(r, 'D', 'Art. 38 E.T. — porcentaje fijado por decreto reglamentario; se liquida en cero mientras no esté publicado', 'F', sz=8.0, i=True, color=MUTED)
+        s.mark_input(r, 'G'); s.money(r, 'G', 0)
     A['incr58'] = r
-    r = s.datarow(zebra=True)
+    # El rayado sigue alternando: con componente inflacionario van dos filas
+    # antes de esta, sin él va una sola.
+    r = s.datarow(zebra=not ci['porcentaje'])
     s.txt(r, 'B', 'R67 · Costos y deducciones procedentes', 'C')
     s.txt(r, 'D', 'Art. 339 E.T. — comisión de administración inmobiliaria, predial, seguros, reparaciones y depreciación de los inmuebles arrendados', 'F', sz=8.0, i=True, color=MUTED)
     s.mark_input(r, 'G'); s.money(r, 'G', 0)
@@ -152,7 +197,9 @@ def build(wb, A, C, T):
     ws[f'G{r}'].comment = Comment(
         'NOTA 13 — Casilla editable para los costos y deducciones procedentes\n'
         'de esta subcédula. No deben superar el tope del 60% que aparece abajo.', AUT, 300, 70)
-    s.note('NOTA 13 — Las rentas de capital admiten ingresos no constitutivos de renta y costos y deducciones procedentes (art. 339 E.T.). Diligéncielos con los soportes: no se informan en la exógena y son plenamente procedentes con certificado.', h=22.0)
+    s.note('NOTA 13 — El componente inflacionario de los rendimientos financieros (art. 38 E.T.) se calcula solo sobre la base de rendimientos de arriba; los costos y deducciones (art. 339 E.T.) siguen abiertos porque no se informan en la exógena y son plenamente procedentes con certificado.'
+           if ci['porcentaje'] else
+           'NOTA 13 — Las rentas de capital admiten ingresos no constitutivos de renta y costos y deducciones procedentes (art. 339 E.T.). Diligéncielos con los soportes: no se informan en la exógena y son plenamente procedentes con certificado.', h=22.0)
     A['tope60_cap'] = tope60('las rentas de capital', A['r58'])
     s.gap()
 

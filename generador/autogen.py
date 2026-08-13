@@ -111,6 +111,9 @@ CLIENTE = {{
     'indices_cesantias_exentas': {idx_cesantias},
     'incrngo_trabajo': {incrngo_trabajo},
     'rentas_capital': {rentas_capital},
+    # Índices de «rentas_capital» que el prevalidador marcó con R59: son los que
+    # llevan componente inflacionario (art. 38 E.T.). Ver inflacionario.py.
+    'indices_incrngo_capital': {idx_incrngo_capital},
     'rentas_no_laborales': {rentas_no_laborales},
 
     # ─────────── 5 · RETENCIONES ───────────
@@ -232,6 +235,7 @@ def construir_datos_py(caso, fuente_archivo):
         idx_cesantias=_py(caso['indices_cesantias_exentas'], 4),
         incrngo_trabajo=_py(caso['incrngo_trabajo'], 4),
         rentas_capital=_py(caso['rentas_capital'], 4),
+        idx_incrngo_capital=_py(caso['indices_incrngo_capital'], 4),
         rentas_no_laborales=_py(caso['rentas_no_laborales'], 4),
         retenciones=_py(caso['retenciones'], 4),
         movimientos=_py(caso['movimientos'], 4),

@@ -4,6 +4,8 @@ from openpyxl.comments import Comment
 from openpyxl.formatting.rule import FormulaRule
 from build_lib import *
 
+import inflacionario
+
 AUT = 'Generador renta'
 ING = "'3. Ingresos'"
 CON = "'8. Consignaciones'"
@@ -86,8 +88,13 @@ def build(wb, A, C, T):
     # ══════════════ B · RENTAS DE CAPITAL ══════════════
     blockhead('BLOQUE B  ·  DEPURACIÓN DE LAS RENTAS DE CAPITAL', GOLD)
     b1 = line('R58', 'Ingresos brutos por rentas de capital', f"={ING}!G{A['r58']}", ind=1, b=True)
+    pct_ci = inflacionario.porcentaje(C.get('ano_gravable'))
     b2 = line('R59', '(−) Ingresos no constitutivos de renta — componente inflacionario',
               f"=-{ING}!G{A['incr58']}",
+              ('Art. 38 E.T. — %s%% de los rendimientos financieros del año gravable %s, '
+               'porcentaje fijado por decreto. La base se detalla en la hoja 3.'
+               % (('%.2f' % (pct_ci * 100)).replace('.', ','), C.get('ano_gravable'))
+               ) if pct_ci else
               'Art. 38 E.T. — porcentaje fijado por decreto reglamentario. Se liquida en cero por no estar publicado; ver la sensibilidad al final de la hoja.',
               zebra=True, h=28.95)
     b3 = line('R67', '(−) Costos y deducciones procedentes', f"=-{ING}!G{A['costos58']}",

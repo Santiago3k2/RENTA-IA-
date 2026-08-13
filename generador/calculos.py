@@ -13,6 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import clasificador
+import inflacionario
 
 
 def _load(path):
@@ -84,14 +85,23 @@ def calcular_dict(C, T=None):
     r58 = sum(v for _, _, v in C['rentas_capital'])
     r74 = sum(v for _, _, v in C['rentas_no_laborales'])
     ing = r32 + r58 + r74
+    # Componente inflacionario de los rendimientos financieros (art. 38 E.T.):
+    # es INCRNGO de la cédula de capital, así que **no reduce los ingresos
+    # brutos** —el tope 1 de la DIAN sigue comparándose contra `ing`— pero sí
+    # baja la renta líquida de capital y, con ella, la base del cupo del 40%.
+    ci = inflacionario.calcular(C)
+    incr58 = ci['valor']
     ces_ex = sum(C['rentas_trabajo'][i][2] for i in C.get('indices_cesantias_exentas', []))
     base25 = r32 - incr - ces_ex - C.get('base_25_excluir', 0)
     ex25 = rnd(min(base25 * 0.25, 790 * uvt)) if base25 > 0 else 0
     solicitadas = ces_ex + ex25
-    cupo = rnd(min(0.4 * (ing - incr), 1340 * uvt))
+    # Los dos usan la misma base que el libro (bloque D de «6. Liquidación»):
+    # ingresos brutos menos TODOS los ingresos no constitutivos de renta.
+    neta = ing - incr - incr58
+    cupo = rnd(min(0.4 * neta, 1340 * uvt))
     aceptadas = min(solicitadas, cupo)
     ded1 = rnd(min(C['base_fe'] / 100, 240 * uvt))
-    rlg = (ing - incr) - aceptadas - ded1
+    rlg = neta - aceptadas - ded1
     base_uvt = rlg / uvt
     impuesto = impuesto_241(base_uvt, uvt)
 
@@ -130,6 +140,7 @@ def calcular_dict(C, T=None):
         'cliente': C, 'textos': T or {},
         'pat_bruto': pat_bruto, 'deudas': deudas, 'pat_liquido': pat_bruto - deudas,
         'ingresos': ing, 'r32': r32, 'r58': r58, 'r74': r74, 'incrngo': incr,
+        'incr58': incr58, 'comp_inflacionario': ci,
         'exentas_aceptadas': aceptadas, 'ded_1pct': ded1, 'rlg': rlg,
         'base_uvt': base_uvt, 'impuesto': impuesto, 'retenciones': ret,
         'anticipo': anticipo, 'metodo1': metodo1, 'saldo': saldo,
