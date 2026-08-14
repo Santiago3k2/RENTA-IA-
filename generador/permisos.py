@@ -149,7 +149,7 @@ class Permisos:
             raise ErrorPermiso('No hace falta pedirse permiso a uno mismo.')
         fila = self.entre(u, so)
         if self.vigente(fila):
-            raise ErrorPermiso('Ya tiene acceso vigente a esa cartera.')
+            raise ErrorPermiso('Ya hay un acceso vigente a esa cartera.')
         fila = self._guardar(u, so, {
             'estado': 'pendiente',
             'motivo': (motivo or '').strip()[:400] or None,

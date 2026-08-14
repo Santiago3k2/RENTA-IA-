@@ -460,9 +460,9 @@ def pagina_registro(mensaje='', valores=None, min_clave=10, aprobacion=False):
     avisarle. Lo demás —rol y cupo— lo decide el sistema, nunca el formulario.
     """
     v = valores or {}
-    nota_final = ('Su cuenta quedará <b>a la espera de aprobación</b>: el '
-                  'administrador la revisa y le avisa por correo.' if aprobacion else
-                  'Podrá entrar de inmediato. El número de declaraciones que puede '
+    nota_final = ('La cuenta queda <b>a la espera de aprobación</b>: el '
+                  'administrador la revisa y responde por correo.' if aprobacion else
+                  'El acceso es inmediato. El número de declaraciones que puede '
                   'procesar lo fija el administrador.')
     tarjeta = f"""<form class="card ancha" method="post" action="/registrarse" id="f" novalidate>
       <div class="card-header">
@@ -511,9 +511,9 @@ def pagina_registro(mensaje='', valores=None, min_clave=10, aprobacion=False):
         <div class="medidor" id="medidor"><i></i></div>
         <div class="fuerza-txt" id="fuerza"></div>
         <div class="mayus" id="mayus">Bloqueo de mayúsculas activado.</div>
-        <p class="reglas">Al menos {min_clave} caracteres. Una frase que recuerde
-        —«mesa verde 2026 sol»— resiste mucho más que ocho caracteres raros.
-        No puede contener su usuario ni su nombre.</p>
+        <p class="reglas">Al menos {min_clave} caracteres. Una frase larga
+        —«mesa verde 2026 sol»— resiste mucho más que ocho caracteres sueltos.
+        No puede contener el usuario ni el nombre.</p>
 
         {_campo_clave('repetir', 'Repita la contraseña', 'new-password', con_ojo=False)}
         <div class="fuerza-txt" id="aviso-repetir"></div>
@@ -546,9 +546,9 @@ def pagina_clave(usuario, token, mensaje='', min_clave=10):
 
       <div class="card-content">
         {_error(mensaje)}
-        <p class="reglas" style="margin:0">La contraseña con la que acaba de entrar se la
-        asignó el administrador, así que él la conoce. Elija una que solo sepa usted;
-        es la última pantalla antes de continuar.</p>
+        <p class="reglas" style="margin:0">La contraseña con la que acaba de entrar la
+        asignó el administrador, así que él la conoce. La nueva debe conocerla solo el
+        titular de la cuenta; es la última pantalla antes de continuar.</p>
 
         {_campo_clave('actual', 'Contraseña provisional', 'current-password',
                       con_ojo=False, autofocus=True)}

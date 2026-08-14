@@ -147,7 +147,7 @@ def probar_panel(nav):
         code, html, _ = nav.get(ruta)
         revisar(code == 200 and marca in html, f'{ruta} carga', f'dio {code}')
     code, html, _ = nav.get('/cuenta')
-    revisar(code == 200 and 'Cambiar mi contraseña' in html, '/cuenta carga')
+    revisar(code == 200 and 'Cambiar la contraseña' in html, '/cuenta carga')
 
 
 def probar_csrf(nav):

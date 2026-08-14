@@ -137,7 +137,7 @@ class Handler(BaseHTTPRequestHandler):
                                                       self.headers.get('Content-Type'))
             if not nombre.lower().endswith('.xlsx'):
                 raise ValueError(
-                    f'«{nombre}» no es un .xlsx. Si su reporte está en el formato .xls antiguo, '
+                    f'«{nombre}» no es un .xlsx. Si el reporte está en el formato .xls antiguo, '
                     'ábralo en Excel y guárdelo como «Libro de Excel (.xlsx)».')
             destino = os.path.join(SUBIDAS, nombre)
             with open(destino, 'wb') as f:

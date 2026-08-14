@@ -99,7 +99,7 @@ LIMITE_SUBIDA = 4 * 1024 * 1024      # lo que admite una función de Vercel
 # El apartado RST queda restringido al administrador mientras se decide cómo se
 # habilita a las demás cuentas. Se comprueba en el servidor, no solo ocultando
 # la pestaña: quien escriba la dirección a mano tampoco entra.
-NO_HAY_RST = ('El apartado del Régimen Simple todavía no está habilitado para su '
+NO_HAY_RST = ('El apartado del Régimen Simple todavía no está habilitado para esta '
               'cuenta. Escriba al administrador si necesita acceso.')
 LIMITE_FORMULARIO = 16 * 1024        # ningún formulario de estos pesa más
 
@@ -120,16 +120,16 @@ AVISOS = {
     'eliminada': 'Cuenta eliminada.',
     'decl_estado': 'Estado de la declaración actualizado.',
     'ajustes': 'Ajustes guardados.',
-    'clave': 'Su contraseña quedó cambiada.',
-    'permiso_dado': ('Acceso concedido. Vence solo, y usted puede retirarlo '
-                     'antes desde «Mi cuenta».'),
-    'permiso_negado': ('Solicitud rechazada. Sus declaraciones siguen siendo '
-                       'suyas y de nadie más.'),
+    'clave': 'Contraseña cambiada.',
+    'permiso_dado': ('Acceso concedido. Vence solo, y puede retirarse antes '
+                     'desde «Mi cuenta».'),
+    'permiso_negado': ('Solicitud rechazada. Nadie más entra a estas '
+                       'declaraciones.'),
     'permiso_revocado': 'Acceso retirado. Surtió efecto de inmediato.',
     'carga_cancelada': ('Carga descartada. No se creó ninguna declaración y no se '
                         'consumió cupo.'),
-    'permiso_pedido': ('Se le pidió el acceso. Solo su dueño puede concederlo, '
-                       'y lo verá al entrar.'),
+    'permiso_pedido': ('Solicitud enviada. Solo el titular puede concederla, '
+                       'y la ve al entrar.'),
 }
 
 
@@ -483,7 +483,7 @@ class handler(BaseHTTPRequestHandler):
     def _get_caso(self, ses, ref):
         caso = nube.buscar(ref, ses['s'], solo_de=ses['solo_de'])
         if not caso:
-            return self._error('Ese caso no existe o no es suyo.', 404)
+            return self._error('Ese caso no existe o no pertenece a esta cuenta.', 404)
         if 'error' in caso:
             return self._error(caso['error'])
         acciones = self._acciones_caso(ses, caso)
@@ -532,22 +532,22 @@ class handler(BaseHTTPRequestHandler):
         if abiertas:
             traba = (f'<p style="margin-top:12px;color:{render.ROJO}"><b>No se puede '
                      f'liberar todavía:</b> quedan {len(abiertas)} alerta(s) de '
-                     f'severidad ALTA sin resolver. Márquelas arriba, una por una, '
-                     f'anotando cómo las resolvió — o corrija lo que haya que '
-                     f'corregir y vuelva a cargar el archivo.</p>')
+                     f'severidad ALTA sin resolver. Se marcan arriba, una por una, '
+                     f'anotando cómo se resolvieron; o se corrige lo que haga falta '
+                     f'y se vuelve a cargar el archivo.</p>')
         # Una declaración no se elimina desde ninguna parte. El cupo es lo que
         # se vende: si borrar devolviera el cupo, una cuenta de cupo 1 podría
         # procesar sin límite subiendo, borrando y volviendo a subir.
         return ('<div class="seccion" style="margin-top:22px"><h2>Revisión</h2>'
-                '<div class="cuerpo"><p>Liberar deja constancia de que usted revisó '
-                'este caso y lo da por bueno. Es una marca de trabajo, no un envío '
+                '<div class="cuerpo"><p>Liberar deja constancia de que el caso quedó '
+                'revisado y se da por bueno. Es una marca de trabajo, no un envío '
                 'a la DIAN.</p><div class="acc-fila" style="justify-content:flex-start">'
                 + ''.join(botones) + '</div>' + traba + '</div></div>')
 
     def _get_libro(self, ses, ref):
         caso = nube.buscar(ref, ses['s'], solo_de=ses['solo_de'])
         if not caso or not caso.get('libro_path'):
-            return self._error('Ese libro no existe o no es suyo.', 404)
+            return self._error('Ese libro no existe o no pertenece a esta cuenta.', 404)
         # En la bitácora NO va el nombre del contribuyente: la lee el
         # administrador, y él no tiene por qué saber a quién le llevan la
         # contabilidad sus usuarios. La referencia del caso basta para auditar.
@@ -694,11 +694,11 @@ class handler(BaseHTTPRequestHandler):
         orden = orden if orden in dict(render.ORDENES) else 'nombre'
         if ses['prestadas']:
             quienes = ', '.join(ses['prestadas'])
-            sub = ('SU CARTERA &nbsp;&middot;&nbsp; Y LA DE ' +
+            sub = ('CARTERA PROPIA &nbsp;&middot;&nbsp; Y LA DE ' +
                    e(quienes.upper()) + ', CON PERMISO VIGENTE')
         else:
-            sub = ('SU CARTERA &nbsp;&middot;&nbsp; NADIE MÁS VE ESTAS '
-                   'DECLARACIONES SIN SU PERMISO')
+            sub = ('CARTERA PROPIA &nbsp;&middot;&nbsp; NADIE MÁS VE ESTAS '
+                   'DECLARACIONES SIN PERMISO DEL TITULAR')
         return render.vista_bandeja(
             lista, error=error, hecho=hecho, usuario=ses['usuario'], cupo=cupo,
             pie=render.PIE_NUBE, mostrar_estado=True, sub=sub, nav=self._nav(ses),
@@ -733,7 +733,7 @@ class handler(BaseHTTPRequestHandler):
             bloques.append(f"""<div class="peticion">
   <div class="peticion-txt">
     <b>{e(nombre)}</b> (<span class="mono-t">{e(p['solicitante'])}</span>)
-    pide entrar a sus declaraciones.
+    pide entrar a estas declaraciones.
     {('<br><i>«' + e(motivo) + '»</i>') if motivo else
      '<br><span class="pista">No escribió un motivo.</span>'}
   </div>
@@ -746,9 +746,9 @@ class handler(BaseHTTPRequestHandler):
     <button class="mini peligro" type="submit">No dar acceso</button>
   </form>
 </div>""")
-        return ('<div class="peticiones"><h2>Alguien pide ver sus declaraciones'
-                '</h2><p class="pista">Mientras no lo conceda, nadie más que '
-                'usted las ve. Puede retirar el acceso cuando quiera desde '
+        return ('<div class="peticiones"><h2>Alguien pide ver estas declaraciones'
+                '</h2><p class="pista">Mientras no se conceda, nadie más las ve. '
+                'El acceso se puede retirar en cualquier momento desde '
                 '<a href="/cuenta">Mi cuenta</a>.</p>'
                 + ''.join(bloques) + '</div>')
 
@@ -768,7 +768,7 @@ class handler(BaseHTTPRequestHandler):
     def _get_recibo_rst(self, ses, ref):
         caso = rst_nube.buscar(ses['s'], ref, solo_de=ses['solo_de'])
         if not caso:
-            return self._error('Ese recibo no existe o no es suyo.', 404)
+            return self._error('Ese recibo no existe o no pertenece a esta cuenta.', 404)
         self._html(rst_vista.vista_recibo(
             caso, usuario=ses['usuario'], pie=render.PIE_NUBE, mostrar_estado=True,
             nav=self._nav(ses, 'rst'),
@@ -790,17 +790,17 @@ class handler(BaseHTTPRequestHandler):
                 f'<input type="hidden" name="estado" value="{valor}">'
                 f'<button class="mini sec" type="submit">{e(texto)}</button></form>')
         bloques = [('<div class="seccion" style="margin-top:22px"><h2>Revisión</h2>'
-                    '<div class="cuerpo"><p>Liberar deja constancia de que usted revisó '
-                    'este recibo y lo da por bueno. Es una marca de trabajo, no una '
+                    '<div class="cuerpo"><p>Liberar deja constancia de que el recibo '
+                    'quedó revisado y se da por bueno. Es una marca de trabajo, no una '
                     'presentación ante la DIAN.</p>'
                     '<div class="acc-fila" style="justify-content:flex-start">'
                     + ''.join(botones) + '</div></div></div>')]
         if caso.get('estado') == 'borrador' and caso.get('creada_por') == ses['usuario']:
             bloques.append(
                 f'<div class="seccion" style="margin-top:22px">'
-                f'<h2>¿Se equivocó de archivo?</h2><div class="cuerpo">'
-                f'<p>Puede eliminar este recibo mientras siga en borrador. Se borran '
-                f'su libro y el consolidado que subió, y recupera el cupo.</p>'
+                f'<h2>Eliminar este recibo</h2><div class="cuerpo">'
+                f'<p>Un recibo en borrador se puede eliminar. Se borran su libro y el '
+                f'consolidado que lo originó, y el cupo se recupera.</p>'
                 f'<form method="get" action="/rst/{e(caso["ref"])}/eliminar">'
                 f'<button class="mini peligro" type="submit">Eliminar este recibo'
                 f'</button></form></div></div>')
@@ -809,7 +809,7 @@ class handler(BaseHTTPRequestHandler):
     def _get_libro_rst(self, ses, ref):
         caso = rst_nube.buscar(ses['s'], ref, solo_de=ses['solo_de'])
         if not caso or not caso['fila'].get('libro_path'):
-            return self._error('Ese libro no existe o no es suyo.', 404)
+            return self._error('Ese libro no existe o no pertenece a esta cuenta.', 404)
         # En la bitácora NO va el nombre del contribuyente: la lee el
         # administrador, y él no tiene por qué saber a quién le llevan la
         # contabilidad sus usuarios. La referencia basta para auditar.
@@ -824,10 +824,10 @@ class handler(BaseHTTPRequestHandler):
     def _eliminar_rst(self, ses, ref):
         caso = rst_nube.buscar(ses['s'], ref, solo_de=ses['solo_de'])
         if not caso:
-            return self._error('Ese recibo no existe o no es suyo.', 404)
+            return self._error('Ese recibo no existe o no pertenece a esta cuenta.', 404)
         if (caso.get('estado') != 'borrador'
                 or caso.get('creada_por') != ses['usuario']):
-            return self._error('Solo puede eliminar un recibo suyo que siga en '
+            return self._error('Solo se eliminan recibos propios que sigan en '
                                'borrador.', 403)
         rst_nube.eliminar(ses['s'], ref)
         ses['cuentas'].anotar('recibo_rst_eliminado', ses['usuario'], rol=ses['rol'],
@@ -1274,7 +1274,7 @@ class handler(BaseHTTPRequestHandler):
         accion = partes[3] if len(partes) > 3 else ''
         caso = nube.buscar(ref, ses['s'], solo_de=ses['solo_de'])
         if not caso:
-            return self._error('Ese caso no existe o no es suyo.', 404)
+            return self._error('Ese caso no existe o no pertenece a esta cuenta.', 404)
 
         if accion == 'estado':
             # Quien ve el caso lo mueve: ya no hay un rol «que revisa» aparte
@@ -1287,8 +1287,8 @@ class handler(BaseHTTPRequestHandler):
             if estado == 'liberada' and abiertas:
                 return self._error(
                     f'No se puede liberar: quedan {len(abiertas)} alerta(s) de '
-                    f'severidad ALTA sin resolver. Márquelas como resueltas en la '
-                    f'ficha del caso, anotando cómo las resolvió.', 400)
+                    f'severidad ALTA sin resolver. Se marcan como resueltas en la '
+                    f'ficha del caso, anotando cómo se resolvieron.', 400)
             ses['s'].cambiar_estado(ref, estado, por=ses['usuario'])
             ses['cuentas'].anotar('declaracion_estado', ses['usuario'], rol=ses['rol'],
                                   objeto=f"declaración {ref}",
@@ -1339,7 +1339,8 @@ class handler(BaseHTTPRequestHandler):
                 raise ValueError('El envío llegó vacío.')
             if largo > LIMITE_SUBIDA:
                 raise ValueError('El archivo supera los 4 MB que admite el servidor. '
-                                 'Procéselo desde el programa instalado en su equipo.')
+                                 'Procéselo desde el programa instalado en el equipo '
+                                 'del contador, que no tiene ese tope.')
             crudo = self.rfile.read(largo)
 
             # El testigo viaja como campo del formulario multipart; se comprueba
@@ -1353,7 +1354,7 @@ class handler(BaseHTTPRequestHandler):
                 crudo, self.headers.get('Content-Type'))
             if not nombre.lower().endswith('.xlsx'):
                 raise ValueError(
-                    f'«{nombre}» no es un .xlsx. Si su reporte está en el formato '
+                    f'«{nombre}» no es un .xlsx. Si el reporte está en el formato '
                     '.xls antiguo, ábralo en Excel y guárdelo como «Libro de Excel (.xlsx)».')
 
             # /tmp es lo único escribible aquí, y se borra con la función.

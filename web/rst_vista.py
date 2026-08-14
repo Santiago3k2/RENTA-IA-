@@ -130,9 +130,9 @@ def formulario(token='', cupo=None):
     """
     if cupo and cupo[0] >= cupo[1]:
         return (f'<div class="subir"><h2>Procesar un bimestre del SIMPLE</h2>'
-                f'<p>Su cupo está completo: ha procesado <b>{cupo[0]} de {cupo[1]}</b>. '
-                f'Puede seguir consultando lo que ya cargó; para ampliarlo, escriba '
-                f'al administrador.</p></div>')
+                f'<p>Cupo completo: <b>{cupo[0]} de {cupo[1]}</b> procesadas. Lo ya '
+                f'cargado sigue disponible para consulta; para ampliar el cupo, '
+                f'escriba al administrador.</p></div>')
     # El grupo NO viene preseleccionado a propósito: define la tarifa y puede
     # duplicar el impuesto. Dejar uno por defecto hacía que se liquidara con él
     # sin que nadie lo hubiera decidido.

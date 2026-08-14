@@ -278,7 +278,7 @@ def populate(wb, A, C, T):
     if not respuestas:
         pie_perfil = ('Ninguno de estos datos llega por exógena: son la única fuente el contribuyente y sus soportes. Responda Sí o No, escriba el detalle y cargue el valor en la hoja indicada — la liquidación no los toma de forma automática.')
     elif faltan:
-        pie_perfil = (f'Lo respondido en la web ya viene diligenciado; las casillas siguen abiertas y usted manda sobre ellas. Quedan {len(faltan)} pregunta(s) sin responder: confírmelas con el contribuyente. La liquidación no toma estos datos de forma automática — cargue el valor en la hoja indicada.')
+        pie_perfil = (f'Lo respondido en la web ya viene diligenciado y las casillas siguen abiertas. Quedan {len(faltan)} pregunta(s) sin responder: confírmelas con el contribuyente. La liquidación no toma estos datos de forma automática — cargue el valor en la hoja indicada.')
     else:
         pie_perfil = ('Las cinco respuestas vienen de lo que se diligenció en la web al generar este libro. Las casillas siguen abiertas: si el contribuyente corrige algo, corríjalo aquí. La liquidación no toma estos datos de forma automática — cargue el valor en la hoja indicada.')
     s.put(r, 'B', pie_perfil,

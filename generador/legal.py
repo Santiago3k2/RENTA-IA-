@@ -97,9 +97,9 @@ LIBRO_RST = (
 # El error exacto cuando alguien intenta generar sin aceptar. Se comprueba en
 # el servidor y no ocultando el botón: es la diferencia entre una cortesía y
 # una condición.
-NO_ACEPTADO = ('Para generar el documento tiene que marcar la casilla de '
-               'revisión. Es lo que deja constancia de que usted sabe que '
-               'debe revisarlo antes de presentarlo.')
+NO_ACEPTADO = ('Para generar el documento hay que marcar la casilla de '
+               'revisión: es la constancia de que el documento se revisa '
+               'antes de presentarlo.')
 
 NOMBRE_CAMPO = 'descargo'          # el name= de la casilla, en los dos apartados
 

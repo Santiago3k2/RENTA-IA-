@@ -209,7 +209,7 @@ def validar_usuario(usuario, reservado_ok=False):
 def validar_correo(correo, obligatorio=True):
     c = normalizar_correo(correo)
     if not c:
-        return 'Escriba su correo electrónico.' if obligatorio else None
+        return 'Escriba el correo electrónico.' if obligatorio else None
     if len(c) > 160 or not _RE_CORREO.match(c):
         return 'Ese correo no parece válido.'
     return None
@@ -232,10 +232,10 @@ def validar_clave(clave, usuario='', nombre=''):
     if plana in CLAVES_PROHIBIDAS:
         return 'Esa contraseña es de las primeras que prueba cualquier ataque. Elija otra.'
     if usuario and normalizar(usuario) in plana:
-        return 'La contraseña no puede contener su nombre de usuario.'
+        return 'La contraseña no puede contener el nombre de usuario.'
     for palabra in (nombre or '').split():
         if len(palabra) > 3 and palabra.lower() in plana:
-            return 'La contraseña no puede contener su nombre.'
+            return 'La contraseña no puede contener el nombre de la persona.'
     if len(set(clave)) < 5:
         return 'La contraseña repite demasiado los mismos caracteres.'
     return None
@@ -593,13 +593,13 @@ class Cuentas:
         if fila['estado'] == 'pendiente':
             self.anotar('acceso_denegado', u, rol=fila['rol'], ip=ip, exito=False,
                         detalle='cuenta pendiente de aprobación')
-            return None, ('Su cuenta está creada pero todavía no ha sido aprobada. '
-                          'El administrador la revisa y le avisa por correo.')
+            return None, ('La cuenta está creada pero todavía no ha sido aprobada. '
+                          'El administrador la revisa y responde por correo.')
         if fila['estado'] == 'inhabilitado':
             self.anotar('acceso_denegado', u, rol=fila['rol'], ip=ip, exito=False,
                         detalle='cuenta inhabilitada')
-            return None, ('Su cuenta está inhabilitada. Escriba al administrador '
-                          'si cree que es un error.')
+            return None, ('Esta cuenta está inhabilitada. Escriba al administrador '
+                          'si se trata de un error.')
 
         cambios = {'intentos_fallidos': 0, 'bloqueado_hasta': None,
                    'ultimo_acceso': iso()}
@@ -644,7 +644,7 @@ class Cuentas:
             raise ErrorCuenta('Esa cuenta ya no existe.')
         if (estado != 'activo' and fila['rol'] == 'admin'
                 and fila['estado'] == 'activo' and not self.cuantos_admin(excepto=id_usuario)):
-            raise ErrorCuenta('No puede inhabilitar al único administrador activo: '
+            raise ErrorCuenta('No se puede inhabilitar al único administrador activo: '
                               'el sitio se quedaría sin quien lo maneje. Cree o '
                               'active otro administrador primero.')
         cambios = {'estado': estado}
@@ -668,8 +668,8 @@ class Cuentas:
             raise ErrorCuenta('Esa cuenta ya no existe.')
         if (fila['rol'] == 'admin' and rol != 'admin'
                 and not self.cuantos_admin(excepto=id_usuario)):
-            raise ErrorCuenta('No puede quitarle el rol al único administrador activo. '
-                              'Nombre otro administrador primero.')
+            raise ErrorCuenta('No se le puede quitar el rol al único administrador '
+                              'activo. Nombre otro administrador primero.')
         # El administrador no procesa declaraciones para clientes: no se le mide
         # cupo. El cliente sí, y ese cupo es lo que se vende.
         cambios = {'rol': rol}
@@ -690,7 +690,8 @@ class Cuentas:
             if cupo < 0:
                 raise ErrorCuenta('El cupo no puede ser negativo.')
             if cupo > 100000:
-                raise ErrorCuenta('Ese cupo no es razonable. Déjelo sin límite.')
+                raise ErrorCuenta('Ese cupo no es razonable; para no poner tope, '
+                                  'marque «Sin límite».')
         actualizada = self._actualizar(id_usuario, {'cupo': cupo})
         self.anotar('cuenta_cupo', por, objeto=fila['usuario'],
                     detalle=f'{"sin límite" if fila["cupo"] is None else fila["cupo"]}'
@@ -803,7 +804,7 @@ class Cuentas:
         if not fila:
             raise ErrorCuenta('Esa cuenta ya no existe.')
         if fila['rol'] == 'admin' and not self.cuantos_admin(excepto=id_usuario):
-            raise ErrorCuenta('No puede eliminar al único administrador activo. '
+            raise ErrorCuenta('No se puede eliminar al único administrador activo. '
                               'Nombre otro administrador antes.')
         borradas = 0
         if con_declaraciones:

@@ -508,11 +508,11 @@ def formulario(cupo=None, token=''):
     if lleno:
         aviso_cupo = (
             f'<div class="cupo" style="border-color:var(--ambar-b);'
-            f'background:var(--ambar-f)"><b>Su cupo está completo:</b> '
-            f'{cupo[0]} de {cupo[1]} declaraciones. No puede procesar un '
-            f'contribuyente nuevo hasta que el administrador se lo amplíe, pero '
-            f'<b>sí puede volver a subir una que ya tenga cargada</b> —por '
-            f'ejemplo, si se equivocó de archivo—: reemplazarla no consume cupo '
+            f'background:var(--ambar-f)"><b>Cupo completo:</b> '
+            f'{cupo[0]} de {cupo[1]} declaraciones. No entran contribuyentes '
+            f'nuevos hasta que el administrador amplíe el cupo, pero <b>sí se '
+            f'puede volver a subir una declaración ya cargada</b> —por ejemplo, '
+            f'si el archivo era el equivocado—: reemplazarla no consume cupo '
             f'nuevo.</div>')
     elif cupo:
         pct = int(cupo[0] * 100 / cupo[1]) if cupo[1] else 0
@@ -526,7 +526,7 @@ def formulario(cupo=None, token=''):
   <p>Arrastre el archivo <b>reporteExogena.xlsx</b> descargado del prevalidador MUISCA.
   RENTA IA lo lee, clasifica cada registro, valida los totales contra los topes precalculados
   por la DIAN y arma el libro de trabajo de 9 hojas. Si algo no cuadra, el caso queda en ROJO
-  y le dice exactamente qué partida falla.</p>
+  e indica exactamente qué partida falla.</p>
   <form method="post" action="/subir" enctype="multipart/form-data" id="f">{campo}
     <label class="zona" id="z">
       <input type="file" name="archivo" id="a" accept=".xlsx" required>
@@ -845,27 +845,27 @@ def vista_confirmar(ref, C, calc, previa=None, cupo=None, token='', usuario='',
     if previa:
         aviso_previa = (
             f'<div class="aviso" style="margin:0 0 18px;border-color:var(--ambar-b);'
-            f'background:var(--ambar-f)"><b>Ya tiene cargada esta declaración.</b> '
+            f'background:var(--ambar-f)"><b>Esta declaración ya está cargada.</b> '
             f'{e(C.get("nombre_titulo", ""))} · AG {e(C.get("ano_gravable", ""))}, '
-            f'del {e(previa)}. Si continúa, <b>se reemplaza</b> por esta: el libro '
+            f'del {e(previa)}. Al continuar <b>se reemplaza</b> por esta: el libro '
             f'y el archivo se sustituyen y las alertas se recalculan. '
             f'<b>No consume cupo nuevo</b> —no se crea otra declaración, se '
-            f'actualiza la que ya tiene— y las alertas que usted haya marcado '
-            f'como resueltas se conservan.</div>')
+            f'actualiza la que ya está— y las alertas marcadas como resueltas '
+            f'se conservan.</div>')
 
     aviso_cupo = ''
     sin_cupo = bool(cupo) and not previa and cupo[0] >= cupo[1]
     if sin_cupo:
         aviso_cupo = (
-            f'<div class="err" style="margin:0 0 18px"><b>No le queda cupo.</b> '
-            f'Lleva {cupo[0]} de {cupo[1]} declaraciones y esta sería una nueva. '
-            f'Escríbale al administrador para que se lo amplíe; lo que ya cargó '
-            f'sigue disponible, y esta carga no se ha guardado.</div>')
+            f'<div class="err" style="margin:0 0 18px"><b>Sin cupo disponible.</b> '
+            f'Van {cupo[0]} de {cupo[1]} declaraciones y esta sería una nueva. '
+            f'Para ampliar el cupo hay que escribir al administrador; lo ya '
+            f'cargado sigue disponible y esta carga no se ha guardado.</div>')
     elif cupo and not previa:
         usadas, tope = cupo
         aviso_cupo = (f'<div class="cupo" style="margin:0 0 18px">Al generar, esta '
-                      f'será la declaración <b>{usadas + 1} de {tope}</b> de su cupo. '
-                      f'Todavía no se ha contado: si cancela, no se gasta.</div>')
+                      f'será la declaración <b>{usadas + 1} de {tope}</b> del cupo. '
+                      f'Todavía no se ha contado: al cancelar, no se gasta.</div>')
 
     preguntas = []
     for clave, pregunta, detalle, _ in mod_perfil.PREGUNTAS:
@@ -885,10 +885,10 @@ def vista_confirmar(ref, C, calc, previa=None, cupo=None, token='', usuario='',
     cuerpo = f"""
 <div class="migas"><a href="/">&larr; Volver a la bandeja</a></div>
 {f'<div class="err">{e(error)}</div>' if error else ''}
-<h1 style="font-size:22px;margin-bottom:6px">Esto encontró RENTA IA en su archivo</h1>
+<h1 style="font-size:22px;margin-bottom:6px">Esto encontró RENTA IA en el archivo</h1>
 <p style="color:var(--text2);font-size:13.4px;margin-bottom:20px;max-width:80ch">
-Revise que sea el contribuyente y el año que esperaba. <b>Todavía no se ha creado
-nada</b>: si algo no cuadra, cancele y no se consume cupo.</p>
+Revise que el contribuyente y el año sean los que corresponden. <b>Todavía no se ha
+creado nada</b>: si algo no cuadra, cancele y no se consume cupo.</p>
 {aviso_previa}{aviso_cupo}
 <div class="conf-caja">
   <div class="conf-tit">El contribuyente</div>
@@ -907,8 +907,8 @@ nada</b>: si algo no cuadra, cancele y no se consume cupo.</p>
   <div class="conf-caja">
     <div class="conf-tit">Lo que la exógena no dice</div>
     <p class="conf-pie" style="margin:0 0 14px">Ninguna de estas cinco cosas llega en
-    el reporte de la DIAN y todas mueven la liquidación. <b>Puede dejarlas en blanco</b>
-    si todavía no las ha confirmado con el contribuyente: el libro las deja abiertas,
+    el reporte de la DIAN y todas mueven la liquidación. <b>Pueden quedar en blanco</b>
+    si todavía no están confirmadas con el contribuyente: el libro las deja abiertas,
     como hasta ahora.</p>
     {''.join(preguntas)}
   </div>
@@ -1021,8 +1021,8 @@ def vista_caso(caso, tolerancia, usuario='', pie=PIE_LOCAL, mostrar_estado=False
                     f'<input type="hidden" name="alerta" value="{e(a["id"])}">'
                     f'<input type="hidden" name="resuelta" value="1">'
                     f'<input type="text" name="nota" maxlength="500" '
-                    f'placeholder="Cómo la resolvió (opcional)" '
-                    f'aria-label="Nota de cómo resolvió la alerta {e(a.get("codigo", ""))}">'
+                    f'placeholder="Cómo se resolvió (opcional)" '
+                    f'aria-label="Nota de cómo se resolvió la alerta {e(a.get("codigo", ""))}">'
                     f'<button class="mini sec" type="submit">Dar por resuelta</button>'
                     f'</form>')
         filas_alertas.append(
